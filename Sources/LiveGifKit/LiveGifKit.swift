@@ -9,7 +9,7 @@ public struct LiveGifKit {
         
     public static let shared = LiveGifKit()
     
-    public func createGif(images: [UIImage], frameRate: Float) async -> URL? {
+    public func createGif(images: [CGImage], frameRate: Float) async -> URL? {
         if images.count == 0 {
             print("图片为空")
             return nil
@@ -18,7 +18,7 @@ public struct LiveGifKit {
         return url
     }
     
-    public func getFrameImages(livePhoto: PHLivePhoto, fps: Double, callback: @escaping ((([UIImage]) -> Void))) async {
+    public func getFrameImages(livePhoto: PHLivePhoto, fps: Double, callback: @escaping ((([CGImage]) -> Void))) async {
         let videoUrl = try? await self.livePhotoConvertToVideo(livePhoto: livePhoto)
         guard let videoUrl = videoUrl else { return }
         self.extractFramesFromVideo(videoUrl: videoUrl, fps: fps, callback: callback)
@@ -26,14 +26,14 @@ public struct LiveGifKit {
     }
     
     /// 批量移除背景
-    public func removeBgColor(images: [UIImage]) async -> [UIImage] {
+    public func removeBgColor(images: [CGImage]) async -> [CGImage] {
         let tasks = images.map { image in
-            Task { () -> UIImage? in
+            Task { () -> CGImage? in
                 return await image.removeBackground()
             }
         }
         return await withTaskCancellationHandler {
-            var newImages: [UIImage] = []
+            var newImages: [CGImage] = []
             for task in tasks {
                 if let value = await task.value {
                     newImages.append(value)
@@ -73,8 +73,8 @@ public struct LiveGifKit {
     }
     
     /// 提取视频的帧
-    func extractFramesFromVideo(videoUrl: URL, fps: Double, callback: @escaping ((([UIImage]) -> Void))) {
-        var images: [UIImage] = []
+    func extractFramesFromVideo(videoUrl: URL, fps: Double, callback: @escaping ((([CGImage]) -> Void))) {
+        var images: [CGImage] = []
         DispatchQueue.global(qos: .default).async {
             
             let asset = AVURLAsset(url: videoUrl)
@@ -91,7 +91,8 @@ public struct LiveGifKit {
      
             generator.generateCGImagesAsynchronously(forTimePoints: frameForTimes) { requestedTime, image, time2, result, error in
                 if let image = image, error == nil {
-                    images.append(UIImage(cgImage: image, scale: 1.0, orientation: .down))
+                    images.append(image)
+                 
                 }
                 if (Int(requestedTime.value) == Int(frameForTimes.last?.value ?? 0)) {
                     try? FileManager.default.removeItem(at: videoUrl)

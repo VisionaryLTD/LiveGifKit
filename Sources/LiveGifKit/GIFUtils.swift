@@ -8,12 +8,12 @@
 import UIKit
 import UniformTypeIdentifiers
 
-extension Array where Element == UIImage {
+extension Array where Element == CGImage {
     func createGIF(frameRate: Float = 0.03) -> URL? {
         let images = self
-        
+        let frameProperties = [kCGImagePropertyGIFDictionary : [ kCGImagePropertyGIFUnclampedDelayTime: frameRate]]
         let fileProperties = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]]
-        let frameProperties = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime as String: frameRate]]
+ 
         
         let documentsDirectoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let tempID = UUID().uuidString
@@ -27,9 +27,7 @@ extension Array where Element == UIImage {
          
         for image in images {
             autoreleasepool {
-                if let cgImage = image.cgImage {
-                    CGImageDestinationAddImage(destination, cgImage, frameProperties as CFDictionary)
-                }
+                CGImageDestinationAddImage(destination, image, frameProperties as CFDictionary)
             }
         }
         

@@ -85,15 +85,13 @@ struct ContentView: View {
             Task {
                 if let livePhoto = try? await self.photoItem!.loadTransferable(type: PHLivePhoto.self) {
                     await LiveGifKit.shared.getFrameImages(livePhoto: livePhoto, fps: self.fps, callback: { images in
-                        self.images = images
                         var endTime = CFAbsoluteTimeGetCurrent() // 获取结束时间
                         print("获取到帧：\(Date()) 耗时: \(endTime - startTime)")
                         Task {
-                            self.noBgimages = await LiveGifKit.shared.removeBgColor(images: images)
+                            let noBgImages = await LiveGifKit.shared.removeBgColor(images: images)
                             let endTime01 = CFAbsoluteTimeGetCurrent()
                             print("获取到去背景帧：\(Date()) 耗时: \(endTime01 - endTime)")
-                            self.gifImages = self.noBgimages
-                            self.gifUrl = await LiveGifKit.shared.createGif(images: self.gifImages, frameRate: 1/Float(self.giffps))
+                            self.gifUrl = await LiveGifKit.shared.createGif(images: noBgImages, frameRate: 1/Float(self.giffps))
                             let endTime02 = CFAbsoluteTimeGetCurrent()
                             print("gif 耗时: \(endTime02 - endTime01)")
                            

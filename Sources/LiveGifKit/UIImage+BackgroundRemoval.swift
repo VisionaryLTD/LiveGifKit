@@ -9,8 +9,8 @@ import UIKit
 import Vision
 import CoreImage.CIFilterBuiltins
 
-extension UIImage {
-    func removeBackground(_ isTrue: Bool = true) async -> UIImage? {
+extension CGImage {
+    func removeBackground(_ isTrue: Bool = true) async -> CGImage? {
         if !isTrue {
             return self
         }
@@ -20,12 +20,9 @@ extension UIImage {
         }.value
     }
     
-    private func removeBackgroundImpl() -> UIImage? {
-        guard let ciImage = getCIImage() else {
-            assertionFailure()
-            return self
-        }
-        
+    private func removeBackgroundImpl() -> CGImage? {
+       
+        let ciImage = CIImage(cgImage: self)
         guard let mask = subjectMask(ciImage: ciImage, atPoint: nil) else {
             return self
         }
@@ -39,23 +36,12 @@ extension UIImage {
         filter.maskImage = mask
         
         let image = filter.outputImage!
-        let resultImage = UIImage(cgImage: render(ciImage: image))
+        let resultImage = render(ciImage: image)
         
         return resultImage
     }
     
-    func getCIImage() -> CIImage? {
-        if let ciImage = ciImage {
-            // CIImage is already available
-            return ciImage
-        } else if let cgImage = cgImage {
-            // Create a new CIImage from the CGImage
-            return CIImage(cgImage: cgImage)
-        } else {
-            // No underlying CIImage or CGImage available
-            return nil
-        }
-    }
+   
 }
 
 private func render(ciImage img: CIImage) -> CGImage {
@@ -65,7 +51,7 @@ private func render(ciImage img: CIImage) -> CGImage {
     return cgImage
 }
 
-private extension UIImage {
+private extension CGImage {
     func subjectMask(ciImage: CIImage, atPoint point: CGPoint?) -> CIImage? {
         // Create a request.
         let request = VNGenerateForegroundInstanceMaskRequest()
@@ -135,14 +121,14 @@ private func instances(
     return instanceLabel == 0 ? observation.allInstances : [Int(instanceLabel)]
 }
 
-extension UIImage {
+extension CGImage {
     func nonTransparentBoundingBox() -> CGRect? {
         let image = self
-        guard let cgImage = image.cgImage, let dataProvider = cgImage.dataProvider else { return nil }
-        guard let pixelData = dataProvider.data else { return nil }
+        
+        guard let pixelData = dataProvider?.data else { return nil }
 
-        let width = cgImage.width
-        let height = cgImage.height
+        let width = self.width
+        let height = self.height
         let data: UnsafePointer<UInt8> = CFDataGetBytePtr(pixelData)
 
         var minX: Int = width
@@ -169,15 +155,15 @@ extension UIImage {
         return CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
     }
     
-    func cropImage(toRect rect: CGRect) -> UIImage? {
-        guard let cgImage = cgImage?.cropping(to: rect) else { return nil }
-        return UIImage(cgImage: cgImage, scale: scale, orientation: imageOrientation)
+    func cropImage(toRect rect: CGRect) -> CGImage? {
+        guard let cgImage = self.cropping(to: rect) else { return nil }
+        return cgImage
     }
 
 }
 
-extension Array where Element == UIImage {
-    func cropImages(toRect rect: CGRect) -> [UIImage] {
+extension Array where Element == CGImage {
+    func cropImages(toRect rect: CGRect) -> [CGImage] {
         compactMap { $0.cropImage(toRect: rect) }
     }
     
