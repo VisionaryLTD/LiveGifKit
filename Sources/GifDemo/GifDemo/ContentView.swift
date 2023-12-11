@@ -21,6 +21,8 @@ struct ContentView: View {
     @State var fps: Double = 15
     @State var giffps: Double = 15
     @State var totalTime = 0.0
+    @State var progess: CGFloat = 0.0
+    @State var totalFrameCount = 0
     var body: some View {
         VStack {
       
@@ -38,21 +40,28 @@ struct ContentView: View {
             
             Spacer()
             if gifUrl?.absoluteString.count ?? 0 > 0 {
-               
                 KFAnimatedImage(gifUrl)
-                              
                                .scaledToFit()
                                .frame(maxHeight: .infinity)
                 
-                Text("总帧数: \(self.gifImages.count)")
+                Text("总帧数: \(self.totalFrameCount)")
                 Text("总耗时: \(self.totalTime)")
-                
+            }
+            
+            if self.progess > 0 {
+                Text("当前进度: \(self.progess)")
             }
             
             Button {
                 self.showPicker.toggle()
             } label: {
                 Text("选择照片")
+            }.padding()
+            
+            Button {
+                SaveImageTool.saveImage(gifUrl: self.gifUrl!)
+            } label: {
+                Text("保存")
             }.padding()
              
             
@@ -84,29 +93,37 @@ struct ContentView: View {
             
             Task {
                 if let livePhoto = try? await self.photoItem!.loadTransferable(type: PHLivePhoto.self) {
-                    await LiveGifKit.shared.getFrameImages(livePhoto: livePhoto, fps: self.fps, callback: { images in
-                        var endTime = CFAbsoluteTimeGetCurrent() // 获取结束时间
-                        print("获取到帧：\(Date()) 耗时: \(endTime - startTime)")
-                        Task {
-                            let noBgImages = await LiveGifKit.shared.removeBgColor(images: images)
-                            let endTime01 = CFAbsoluteTimeGetCurrent()
-                            print("获取到去背景帧：\(Date()) 耗时: \(endTime01 - endTime)")
-                            self.gifUrl = await LiveGifKit.shared.createGif(images: noBgImages, frameRate: 1/Float(self.giffps))
-                            let endTime02 = CFAbsoluteTimeGetCurrent()
-                            print("gif 耗时: \(endTime02 - endTime01)")
-                           
-                            print("总耗时: \(endTime02 - startTime) 秒") // 输出耗时
-                            self.totalTime = Double(Float(endTime02 - startTime))
-                            self.photoItem = nil
-                        }
-                    })
-                    print("图片数量: \(self.images.count)")
+                    let result = await LiveGifKit2.shared.createGif(livePhoto: livePhoto, fps: self.fps) { progess in
+                        self.progess = progess
+                    }
+                    self.progess = 0
+                    self.gifUrl = result?.0
+                    self.totalFrameCount = result?.1 ?? 0
+                    self.photoItem = nil
+                    var endTime = CFAbsoluteTimeGetCurrent()
+                    self.totalTime = Double(Float(endTime - startTime))
+//                    await LiveGifKit.shared.getFrameImages(livePhoto: livePhoto, fps: self.fps, callback: { images in
+//                        var endTime = CFAbsoluteTimeGetCurrent() // 获取结束时间
+//                        print("获取到帧：\(Date()) 耗时: \(endTime - startTime)")
+//                        Task {
+//                            let noBgImages = await LiveGifKit.shared.removeBgColor(images: images)
+//                            let endTime01 = CFAbsoluteTimeGetCurrent()
+//                            print("获取到去背景帧：\(Date()) 耗时: \(endTime01 - endTime)")
+//                            self.gifUrl = await LiveGifKit.shared.createGif(images: noBgImages, frameRate: 1/Float(self.giffps))
+//                            let endTime02 = CFAbsoluteTimeGetCurrent()
+//                            print("gif 耗时: \(endTime02 - endTime01)")
+//                           
+//                            print("总耗时: \(endTime02 - startTime) 秒") // 输出耗时
+//                            self.totalTime = Double(Float(endTime02 - startTime))
+//                            self.photoItem = nil
+//                        }
+//                    })
+//                    print("图片数量: \(self.images.count)")
                 }
-                
             }
-           
         }
     }
+    
     
 }
 
