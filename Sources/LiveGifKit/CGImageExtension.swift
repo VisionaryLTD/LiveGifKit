@@ -1,11 +1,11 @@
 //
-//  UIImage+BackgroundRemoval.swift
+//  File.swift
+//  
 //
-//
-//  Created by Kai Shao on 2023/11/28.
+//  Created by tangxiaojun on 2023/12/12.
 //
 
-import UIKit
+import Foundation
 import Vision
 import CoreImage.CIFilterBuiltins
 

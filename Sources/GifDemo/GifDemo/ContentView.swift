@@ -9,31 +9,27 @@ import SwiftUI
 import PhotosUI
 import LiveGifKit
 import Kingfisher
+import Photos
 
 struct ContentView: View {
     @State var photoItem: PhotosPickerItem?
     @State var showPicker: Bool = false
     @State var images = [UIImage]()
-    @State var noBgimages = [UIImage]()
-    @State var gifImages = [UIImage]()
     @State var gifUrl: URL?
-    
     @State var fps: Double = 15
     @State var giffps: Double = 15
     @State var totalTime = 0.0
-    @State var progess: CGFloat = 0.0
-    @State var totalFrameCount = 0
+    @State var saveStatus = ""
     var body: some View {
         VStack {
-      
             Slider(value: $fps, in: 5...60, step: 5)
             .overlay(Text("每秒帧数(FPS): \(Int(fps))")
                          .foregroundColor(.primary)
                          .font(.headline)
                          .offset(x: 0, y: -20))
             
-            Slider(value: $giffps, in: 5...60, step: 5)
-            .overlay(Text("GIF每秒帧数(FPS): \(Int(giffps))")
+            Slider(value: $giffps, in: 0.01...0.1, step: 0.01)
+            .overlay(Text("GIF每秒帧数(FPS): \(giffps)")
                          .foregroundColor(.primary)
                          .font(.headline)
                          .offset(x: 0, y: -20))
@@ -44,40 +40,39 @@ struct ContentView: View {
                                .scaledToFit()
                                .frame(maxHeight: .infinity)
                 
-                Text("总帧数: \(self.totalFrameCount)")
+                Text("总帧数: \(self.images.count)")
                 Text("总耗时: \(self.totalTime)")
-            }
-            
-            if self.progess > 0 {
-                Text("当前进度: \(self.progess)")
             }
             
             Button {
                 self.showPicker.toggle()
+//                self.getRecent()
             } label: {
                 Text("选择照片")
             }.padding()
             
             Button {
-                SaveImageTool.saveImage(gifUrl: self.gifUrl!)
+                Task {
+                    let result = try await AlbumTool.save(method: .url(self.gifUrl!))
+                    self.saveStatus = result
+                    
+                }
             } label: {
-                Text("保存")
+                Text("保存照片\(self.saveStatus)")
             }.padding()
-             
             
-            if noBgimages.count > 0 {
+            if self.images.count > 0 {
                 ScrollView(.horizontal) {
                     HStack(spacing: 10, content: {
-                        ForEach(self.noBgimages, id: \.self) { image in
+                        ForEach(self.images, id: \.self) { image in
                             Image(uiImage: image)
                                 .resizable()
-                                .scaledToFit()
-                                .frame(width: 150, height: 150)
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 200)
                         }
                     })
                 }
             }
-
         }
         .padding()
         .sheet(isPresented: $showPicker, content: {
@@ -87,43 +82,51 @@ struct ContentView: View {
             if self.photoItem == nil {
                 return
             }
+            guard let photoItem = self.photoItem else { return }
             self.showPicker.toggle()
             print("开始：\(Date())")
             let startTime = CFAbsoluteTimeGetCurrent()
-            
             Task {
-                if let livePhoto = try? await self.photoItem!.loadTransferable(type: PHLivePhoto.self) {
-                    let result = await LiveGifKit2.shared.createGif(livePhoto: livePhoto, fps: self.fps) { progess in
-                        self.progess = progess
-                    }
-                    self.progess = 0
-                    self.gifUrl = result?.0
-                    self.totalFrameCount = result?.1 ?? 0
+                let result = try? await LiveGifTool.shared.createGif(pickerItem: photoItem)
+                let endTime = CFAbsoluteTimeGetCurrent()
+                switch result {
+                case .failure(let error):
+                    print("错误： \(error)")
+                case .success(let gif):
+                    self.gifUrl = gif.url
                     self.photoItem = nil
-                    var endTime = CFAbsoluteTimeGetCurrent()
-                    self.totalTime = Double(Float(endTime - startTime))
-//                    await LiveGifKit.shared.getFrameImages(livePhoto: livePhoto, fps: self.fps, callback: { images in
-//                        var endTime = CFAbsoluteTimeGetCurrent() // 获取结束时间
-//                        print("获取到帧：\(Date()) 耗时: \(endTime - startTime)")
-//                        Task {
-//                            let noBgImages = await LiveGifKit.shared.removeBgColor(images: images)
-//                            let endTime01 = CFAbsoluteTimeGetCurrent()
-//                            print("获取到去背景帧：\(Date()) 耗时: \(endTime01 - endTime)")
-//                            self.gifUrl = await LiveGifKit.shared.createGif(images: noBgImages, frameRate: 1/Float(self.giffps))
-//                            let endTime02 = CFAbsoluteTimeGetCurrent()
-//                            print("gif 耗时: \(endTime02 - endTime01)")
-//                           
-//                            print("总耗时: \(endTime02 - startTime) 秒") // 输出耗时
-//                            self.totalTime = Double(Float(endTime02 - startTime))
-//                            self.photoItem = nil
-//                        }
-//                    })
-//                    print("图片数量: \(self.images.count)")
+                    self.images = gif.uiImages
+                    self.totalTime = endTime - startTime
+                    print(gif.url)
+                default:
+                    break
                 }
             }
         }
     }
     
+    func getRecent() {
+       
+
+        // 获取最近三十天的照片
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.predicate = NSPredicate(format: "creationDate > %@", Calendar.current.date(byAdding: .day, value: -30, to: Date())! as NSDate)
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        let fetchResult = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+        fetchResult.enumerateObjects { object, _, _ in
+            guard let asset = object as? PHAsset else { return }
+            let requestOptions = PHImageRequestOptions()
+            requestOptions.isSynchronous = true
+            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 200, height: 200), contentMode: .aspectFit, options: requestOptions) { image, _ in
+                guard let image = image else { return }
+                print("哈哈哈哈: \(image)")
+//                self.iamges.append(image)
+                // 在这里处理您获取的照片，比如将其添加到一个数组中等等。
+            }
+        }
+    }
+    
+  
     
 }
 

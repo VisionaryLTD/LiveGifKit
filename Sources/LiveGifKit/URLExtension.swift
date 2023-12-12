@@ -1,3 +1,4 @@
+//
 //  File.swift
 //
 //
@@ -9,39 +10,10 @@ import AVFoundation
 import Foundation
 import UniformTypeIdentifiers
 import CoreText
-import Photos
-
-public struct LiveGifKit2 {
-    public static let shared = LiveGifKit2()
-    
-    public func createGif(livePhoto: PHLivePhoto, fps: CGFloat, updateProgress: @escaping (CGFloat) -> Void) async -> (URL, Int)? {
-        let videoUrl = try? await LiveGifKit.shared.livePhotoConvertToVideo(livePhoto: livePhoto)
-        guard let videoUrl = videoUrl else { return nil }
-        
-        let result = try? await videoUrl.convertToGIF(maxSize: nil, desiredFrameRate: fps, updateProgress: updateProgress)
-        
-        switch result {
-        case .failure(let error):
-            print("转换错误: \(error)")
-            return nil
-        case .success((let url, let frameCount)):
-            return (url, frameCount)
-        case .none:
-            return nil
-        }
-    }
-}
-
-public enum GIFError: Error {
-    case unableToReadFile
-    case unableToFindTrack
-    case unableToCreateOutput
-    case unknown
-}
 
 public extension URL {
     // swiftlint:disable:next function_body_length cyclomatic_complexity
-    func convertToGIF(maxSize cappedResolution: CGFloat?, desiredFrameRate:CGFloat = 15.0, updateProgress: @escaping (CGFloat) -> Void) async throws -> Result<(URL, Int), GIFError> {
+    func convertToGIF(maxResolution: CGFloat? = 300, frameDelay: CGFloat = 15.0, updateProgress: @escaping (CGFloat) -> Void) async throws -> Result<GifResult, GifError> {
         let asset = AVURLAsset(url: self)
         
         guard let reader = try? AVAssetReader(asset: asset) else {
@@ -61,12 +33,12 @@ public extension URL {
         videoSize = videoFrame.size
         let resultingSize: CGSize
         
-        if let cappedResolution {
+        if let maxResolution {
             if videoSize.width > videoSize.height {
-                let cappedWidth = round(min(cappedResolution, videoSize.width))
+                let cappedWidth = round(min(maxResolution, videoSize.width))
                 resultingSize = CGSize(width: cappedWidth, height: round(cappedWidth / aspectRatio))
             } else {
-                let cappedHeight = round(min(cappedResolution, videoSize.height))
+                let cappedHeight = round(min(maxResolution, videoSize.height))
                 resultingSize = CGSize(width: round(cappedHeight * aspectRatio), height: cappedHeight)
             }
         } else {
@@ -79,7 +51,7 @@ public extension URL {
         
         // In order to convert from, say 30 FPS to 20, we'd need to remove 1/3 of the frames, this applies that math and decides which frames to remove/not process
         
-        let framesToRemove = calculateFramesToRemove(desiredFrameRate: desiredFrameRate, nominalFrameRate: nominalFrameRate, nominalTotalFrames: nominalTotalFrames)
+        let framesToRemove = calculateFramesToRemove(desiredFrameRate: frameDelay, nominalFrameRate: nominalFrameRate, nominalTotalFrames: nominalTotalFrames)
         
         let totalFrames = nominalTotalFrames - framesToRemove.count
         
@@ -96,7 +68,7 @@ public extension URL {
         
         // An array where each index corresponds to the delay for that frame in seconds.
         // Note that since it's regarding frames, the first frame would be the 0th index in the array.
-        let frameDelays = calculateFrameDelays(desiredFrameRate: desiredFrameRate, nominalFrameRate: nominalFrameRate, totalFrames: totalFrames)
+        let frameDelays = calculateFrameDelays(desiredFrameRate: frameDelay, nominalFrameRate: nominalFrameRate, totalFrames: totalFrames)
         
         // Since there can be a disjoint mapping between frame delays
         // and the frames in the video/pixel buffer (if we're lowering
@@ -104,7 +76,6 @@ public extension URL {
         // frame rate) rather than messing around with a complicated mapping,
         // just have a stack where we pop frame delays off as we use them
         var appliedFrameDelayStack = frameDelays
-        
         var sample: CMSampleBuffer? = readerOutput.copyNextSampleBuffer()
         
         let fileProperties: [String: Any] = [
@@ -112,14 +83,13 @@ public extension URL {
                 kCGImagePropertyGIFLoopCount as String: 0
             ]
         ]
-        let startTime = CFAbsoluteTimeGetCurrent()
         
+        let startTime = CFAbsoluteTimeGetCurrent()
         let resultingFilename = "\(startTime)-Image.gif"
         let resultingFileURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(resultingFilename)
         
         if FileManager.default.fileExists(atPath: resultingFileURL.path) {
             do {
-                
                 try FileManager.default.removeItem(at: resultingFileURL)
             } catch {
                 print("删除目录错误: \(error)")
@@ -133,25 +103,18 @@ public extension URL {
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
         
         var framesCompleted = 0
-        
-        // Refers index refers to the frame index in the actual video/pixel buffer,
-        // rather than the frames we may actually be deciding to use for the GIF.
+ 
         var currentFrameIndex = 0
-        
-        var frameCount = 0
+        var cgImages: [CGImage] = []
         while sample != nil {
             currentFrameIndex += 1
             if framesToRemove.contains(currentFrameIndex) {
                 sample = readerOutput.copyNextSampleBuffer()
                 continue
             }
-            
-            // Should probably look into why the delay stack would be empty here, but
-            // I assume it's just a total frames reporting issue with AVFoundation and
-            // this seems to work fine.
+ 
             guard !appliedFrameDelayStack.isEmpty else { break }
             
-            // See description of frame delay stack above
             let frameDelay = appliedFrameDelayStack.removeFirst()
             
             if let newSample = sample {
@@ -168,11 +131,9 @@ public extension URL {
                         ]
                     ]
                     if let cgImage = await cgImage.removeBackground() {
-                        if let cgI = addWatermark(to: cgImage, withText: "DoubleQ") {
-                            frameCount += 1
-                            CGImageDestinationAddImage(destination, cgI, frameProperties as CFDictionary)
-
-                        }
+                        cgImages.append(cgImage)
+                        let uiImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .left)
+                        CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
                     }
                 }
                 
@@ -194,31 +155,26 @@ public extension URL {
         guard didCreateGIF else {
             return .failure(.unknown)
         }
-        
-        return .success((resultingFileURL, frameCount))
+        return .success(.init(url: resultingFileURL, frames: cgImages, videoTransform: videoTransform))
     }
-    
+
     private func cgImageFromSampleBuffer(_ buffer: CMSampleBuffer) -> CGImage? {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(buffer) else {
             return nil
         }
         
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        
         let base = CVPixelBufferGetBaseAddress(pixelBuffer)
         let bytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         let info = CGImageAlphaInfo.premultipliedFirst.rawValue
-        
         guard let context = CGContext(data: base, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytes, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: info) else {
             return nil
         }
-        
         let image = context.makeImage()
         
         CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly)
-        
         return image
     }
     
@@ -292,7 +248,7 @@ public extension URL {
     }
 }
 
-
+//水印
 func addWatermark(to cgImage: CGImage, withText text: String) -> CGImage? {
     // Set the font and text color
     let font = UIFont.boldSystemFont(ofSize: 32)
