@@ -47,7 +47,21 @@ struct LiveGifTool2 {
         }
     }
     
-    static func getImageOrientation(transform: CGAffineTransform) -> UIImage.Orientation {
+    static func getCGImageOrientation(transform: CGAffineTransform) -> CGImagePropertyOrientation {
+        if transform.a == 0 && transform.b == 1.0 && transform.c == -1.0 && transform.d == 0 {
+            return .right
+        } else if transform.a == 0 && transform.b == -1.0 && transform.c == 1.0 && transform.d == 0 {
+            return .left
+        } else if transform.a == 1.0 && transform.b == 0 && transform.c == 0 && transform.d == 1.0 {
+            return .up
+        } else if transform.a == -1.0 && transform.b == 0 && transform.c == 0 && transform.d == -1.0 {
+            return .down
+        } else {
+            return .up
+        }
+    }
+    
+    static func getUIImageOrientation(transform: CGAffineTransform) -> UIImage.Orientation {
         if transform.a == 0 && transform.b == 1.0 && transform.c == -1.0 && transform.d == 0 {
             return .right
         } else if transform.a == 0 && transform.b == -1.0 && transform.c == 1.0 && transform.d == 0 {

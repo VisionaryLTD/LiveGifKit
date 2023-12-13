@@ -13,7 +13,7 @@ import CoreText
 
 public extension URL {
     // swiftlint:disable:next function_body_length cyclomatic_complexity
-    func convertToGIF(maxResolution: CGFloat? = 300, frameDelay: CGFloat = 15.0, updateProgress: @escaping (CGFloat) -> Void) async throws -> Result<GifResult, GifError> {
+    func convertToGIF(maxResolution: CGFloat? = 300, frameDelay: CGFloat = 15.0, gifFps: CGFloat = 0.03, updateProgress: @escaping (CGFloat) -> Void) async throws -> Result<GifResult, GifError> {
         let asset = AVURLAsset(url: self)
         
         guard let reader = try? AVAssetReader(asset: asset) else {
@@ -76,14 +76,7 @@ public extension URL {
         // frame rate) rather than messing around with a complicated mapping,
         // just have a stack where we pop frame delays off as we use them
         var appliedFrameDelayStack = frameDelays
-        var sample: CMSampleBuffer? = readerOutput.copyNextSampleBuffer()
-        
-        let fileProperties: [String: Any] = [
-            kCGImagePropertyGIFDictionary as String: [
-                kCGImagePropertyGIFLoopCount as String: 0
-            ]
-        ]
-        
+ 
         let startTime = CFAbsoluteTimeGetCurrent()
         let resultingFilename = "\(startTime)-Image.gif"
         let resultingFileURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(resultingFilename)
@@ -100,12 +93,18 @@ public extension URL {
             return .failure(.unableToCreateOutput)
         }
         
+        let fileProperties: [String: Any] = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]]
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
         
+        /// 开始遍历
+        let frameProperties: [String: Any] = [
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: gifFps],
+            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(transform: videoTransform).rawValue
+        ]
         var framesCompleted = 0
- 
         var currentFrameIndex = 0
-        var cgImages: [CGImage] = []
+        var uiImages: [UIImage] = []
+        var sample: CMSampleBuffer? = readerOutput.copyNextSampleBuffer()
         while sample != nil {
             currentFrameIndex += 1
             if framesToRemove.contains(currentFrameIndex) {
@@ -114,48 +113,36 @@ public extension URL {
             }
  
             guard !appliedFrameDelayStack.isEmpty else { break }
-            
             let frameDelay = appliedFrameDelayStack.removeFirst()
-            
             if let newSample = sample {
                 // Create it as an optional and manually nil it out every time it's
                 // finished otherwise weird Swift bug where memory will balloon enormously
                 // (see https://twitter.com/ChristianSelig/status/1241572433095770114)
                 var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
-                
                 framesCompleted += 1
                 if let cgImage {
-                    let frameProperties: [String: Any] = [
-                        kCGImagePropertyGIFDictionary as String: [
-                            kCGImagePropertyGIFDelayTime: frameDelay
-                        ]
-                    ]
                     if let cgImage = await cgImage.removeBackground() {
-                        cgImages.append(cgImage)
-                        let uiImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .left)
-                        CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
+                        uiImages.append(UIImage(cgImage: cgImage, scale: 1, orientation: LiveGifTool2.getUIImageOrientation(transform: videoTransform)))
+                        CGImageDestinationAddImage(destination, cgImage, frameProperties as CFDictionary)
                     }
                 }
                 
                 cgImage = nil
-                
                 let progress = CGFloat(framesCompleted) / CGFloat(totalFrames)
                 
-                // GIF progress is a little fudged so it works with downloading progress reports
+                /// 进度
                 Task { @MainActor in
                     updateProgress(progress)
                 }
             }
-            
             sample = readerOutput.copyNextSampleBuffer()
         }
         
         let didCreateGIF = CGImageDestinationFinalize(destination)
-        
         guard didCreateGIF else {
             return .failure(.unknown)
         }
-        return .success(.init(url: resultingFileURL, frames: cgImages, videoTransform: videoTransform))
+        return .success(.init(url: resultingFileURL, frames: uiImages))
     }
 
     private func cgImageFromSampleBuffer(_ buffer: CMSampleBuffer) -> CGImage? {

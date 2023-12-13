@@ -10,9 +10,10 @@ import AVFoundation
 import Foundation
 import UniformTypeIdentifiers
 import CoreText
+import UIKit
 
-extension Array where Element == CGImage {
-    public func createGif(frameDelay: CGFloat = 15.0) async throws -> Result<GifResult, GifError> {
+extension Array where Element == UIImage {
+    public func createGif(frameDelay: CGFloat = 0.03) async throws -> Result<GifResult, GifError> {
         let resultingFilename = "Image.gif"
         let resultingFileURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(resultingFilename)
         if FileManager.default.fileExists(atPath: resultingFileURL.path) {
@@ -28,21 +29,21 @@ extension Array where Element == CGImage {
         }
         
         let fileProperties: [String: Any] = [
-            kCGImagePropertyGIFDictionary as String: [ kCGImagePropertyGIFLoopCount as String: 0]
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]
+        ]
+        let frameProperties: [String: Any] = [
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: frameDelay],
+            kCGImagePropertyOrientation as String: CGImagePropertyOrientation.right.rawValue
         ]
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
-        for cgImage in self {
-            let frameProperties: [String: Any] = [
-                kCGImagePropertyGIFDictionary as String: [
-                    kCGImagePropertyGIFDelayTime: frameDelay
-                ]
-            ]
-            CGImageDestinationAddImage(destination, cgImage, frameProperties as CFDictionary)
+      
+        for image in self {
+            CGImageDestinationAddImage(destination, image.cgImage!, frameProperties as CFDictionary)
         }
         let didCreateGIF = CGImageDestinationFinalize(destination)
         guard didCreateGIF else {
             return .failure(.unknown)
         }
-        return .success(.init(url: resultingFileURL, frames: self, videoTransform: nil))
+        return .success(.init(url: resultingFileURL, frames: self))
     }
 }
