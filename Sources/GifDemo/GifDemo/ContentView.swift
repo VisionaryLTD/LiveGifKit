@@ -17,9 +17,10 @@ struct ContentView: View {
     @State var images = [UIImage]()
     @State var gifUrl: URL?
     @State var fps: Double = 15
-    @State var giffps: Double = 0.03
+    @State var giffps: Double = 30
     @State var totalTime = 0.0
     @State var saveStatus = ""
+    @State var gifTool: LiveGifTool?  = LiveGifTool()
     var body: some View {
         VStack {
             Slider(value: $fps, in: 5...60, step: 5)
@@ -28,8 +29,8 @@ struct ContentView: View {
                     .font(.headline)
                     .offset(x: 0, y: -20))
             
-            Slider(value: $giffps, in: 0.01...0.1, step: 0.01)
-                .overlay(Text("GIF每秒帧数(FPS): \(giffps)")
+            Slider(value: $giffps, in: 5...60, step: 5)
+                .overlay(Text("GIF每秒帧数(FPS): \(Int(giffps))")
                     .foregroundColor(.primary)
                     .font(.headline)
                     .offset(x: 0, y: -20))
@@ -38,23 +39,32 @@ struct ContentView: View {
             if gifUrl?.absoluteString.count ?? 0 > 0 {
                 KFAnimatedImage(gifUrl)
                     .scaledToFit()
-                    .frame(maxHeight: .infinity)
+                    .frame(width: 300)
                 
                 Text("总帧数: \(self.images.count)")
                 Text("总耗时: \(self.totalTime)")
             }
-            
-            Button {
-                self.showPicker.toggle()
-                //                self.getRecent()
-            } label: {
-                Text("选择照片")
-            }.padding()
-            
+            HStack {
+                Button {
+                    self.showPicker.toggle()
+                } label: {
+                    Text("选择照片")
+                }.padding()
+                
+                Button {
+                    self.gifTool?.cleanup()
+                } label: {
+                    Text("删除目录")
+                }.padding()
+            }
+ 
             Button {
                 Task {
-                    let result = try await AlbumTool.save(method: .url(self.gifUrl!))
-                    self.saveStatus = result
+                    do {
+                        try await self.gifTool?.save(method: .url(self.gifUrl!))
+                    } catch {
+                        print("失败: \(error)")
+                    }
                 }
             } label: {
                 Text("保存照片\(self.saveStatus)")
@@ -62,12 +72,11 @@ struct ContentView: View {
             
             Button {
                 Task {
-                    let result = try await LiveGifTool.shared.createGif(frames: self.images, frameDelay: self.giffps)
-                    switch result {
-                    case .success(let gif):
-                        self.gifUrl = gif.url
-                        print("新的url：\(String(describing: self.gifUrl))")
-                    case .failure(let error):
+                    do {
+                        let gif = try await self.gifTool?.createGif(frames: self.images, gifFrameRate: self.giffps)
+                        self.gifUrl = gif?.url
+                        print("新的URL: \(String(describing: self.gifUrl))")
+                    } catch {
                         print("失败: \(error)")
                     }
                 }
@@ -82,7 +91,7 @@ struct ContentView: View {
                             Image(uiImage: image)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
-                                .frame(width: 200)
+                                .frame(width: 300)
                         }
                     })
                 }
@@ -93,27 +102,22 @@ struct ContentView: View {
             PhotoPickerView(pickedItem: $photoItem)
         })
         .onChange(of: self.photoItem) {
-            if self.photoItem == nil {
-                return
-            }
-            guard let photoItem = self.photoItem else { return }
-            self.showPicker.toggle()
-            print("开始：\(Date())")
-            let startTime = CFAbsoluteTimeGetCurrent()
             Task {
-                let result = try? await LiveGifTool.shared.createGif(pickerItem: photoItem, gifFps: self.giffps)
-                let endTime = CFAbsoluteTimeGetCurrent()
-                switch result {
-                case .failure(let error):
-                    print("错误： \(error)")
-                case .success(let gif):
-                    self.gifUrl = gif.url
+                guard let photoItem = self.photoItem else { return }
+                guard let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self)  else { return }
+                self.showPicker.toggle()
+                print("开始：\(Date())")
+                let startTime = CFAbsoluteTimeGetCurrent()
+                do {
+                    let gif = try await self.gifTool?.createGif(livePhoto: livePhoto, gifFrameRate: self.giffps)
+                    let endTime = CFAbsoluteTimeGetCurrent()
+                    self.gifUrl = gif?.url
                     self.photoItem = nil
-                    self.images = gif.frames
+                    self.images = gif?.frames ?? []
                     self.totalTime = endTime - startTime
-                    print(gif.url)
-                default:
-                    break
+                    print("首次URL: \(String(describing: self.gifUrl))")
+                } catch {
+                    print("异常: \(error)")
                 }
             }
         }
@@ -138,5 +142,3 @@ struct ContentView: View {
         }
     }
 }
-
-

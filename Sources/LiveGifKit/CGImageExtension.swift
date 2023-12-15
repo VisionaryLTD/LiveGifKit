@@ -1,6 +1,6 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by tangxiaojun on 2023/12/12.
 //
@@ -14,34 +14,26 @@ extension CGImage {
         if !isTrue {
             return self
         }
-        
         return await Task.detached {
             self.removeBackgroundImpl()
         }.value
     }
     
     private func removeBackgroundImpl() -> CGImage? {
-       
         let ciImage = CIImage(cgImage: self)
         guard let mask = subjectMask(ciImage: ciImage, atPoint: nil) else {
             return self
         }
-        
         // Acquire the selected background image.
         let backgroundImage = CIImage(color: CIColor.clear).cropped(to: ciImage.extent)
-        
         let filter = CIFilter.blendWithMask()
         filter.inputImage = ciImage
         filter.backgroundImage = backgroundImage
         filter.maskImage = mask
-        
         let image = filter.outputImage!
         let resultImage = render(ciImage: image)
-        
         return resultImage
     }
-    
-   
 }
 
 private func render(ciImage img: CIImage) -> CGImage {

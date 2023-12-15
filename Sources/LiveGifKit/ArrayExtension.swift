@@ -1,6 +1,6 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by tangxiaojun on 2023/12/12.
 //
@@ -13,27 +13,21 @@ import CoreText
 import UIKit
 
 extension Array where Element == UIImage {
-    public func createGif(frameDelay: CGFloat = 0.03) async throws -> Result<GifResult, GifError> {
-        let resultingFilename = "Image.gif"
-        let resultingFileURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(resultingFilename)
-        if FileManager.default.fileExists(atPath: resultingFileURL.path) {
-            do {
-                try FileManager.default.removeItem(at: resultingFileURL)
-            } catch {
-                print("删除目录错误: \(error)")
-            }
-        }
-        
-        guard let destination = CGImageDestinationCreateWithURL(resultingFileURL as CFURL, UTType.gif.identifier as CFString, self.count, nil) else {
-            return .failure(.unableToCreateOutput)
+    public func createGif(gifFrameRate: CGFloat = 30, gifDirURL: URL) async throws -> GifResult {
+        try? LiveGifTool2.createDir(dirURL: gifDirURL)
+        let gifFileName = "\(Int(Date().timeIntervalSince1970)).gif"
+        let gifURL = gifDirURL.appending(path: gifFileName)
+      
+        guard let destination = CGImageDestinationCreateWithURL(gifURL as CFURL, UTType.gif.identifier as CFString, self.count, nil) else {
+            throw GifError.unableToCreateOutput
         }
         
         let fileProperties: [String: Any] = [
             kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]
         ]
         let frameProperties: [String: Any] = [
-            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: frameDelay],
-            kCGImagePropertyOrientation as String: CGImagePropertyOrientation.right.rawValue
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFrameRate],
+            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(imageOrientation: self.first?.imageOrientation ?? .right).rawValue
         ]
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
       
@@ -42,8 +36,8 @@ extension Array where Element == UIImage {
         }
         let didCreateGIF = CGImageDestinationFinalize(destination)
         guard didCreateGIF else {
-            return .failure(.unknown)
+            throw GifError.unknown
         }
-        return .success(.init(url: resultingFileURL, frames: self))
+        return GifResult.init(url: gifURL, frames: self)
     }
 }

@@ -11,17 +11,17 @@ import Foundation
 import UniformTypeIdentifiers
 import CoreText
 
-public extension URL {
+extension URL {
     // swiftlint:disable:next function_body_length cyclomatic_complexity
-    func convertToGIF(maxResolution: CGFloat? = 300, frameDelay: CGFloat = 15.0, gifFps: CGFloat = 0.03, updateProgress: @escaping (CGFloat) -> Void) async throws -> Result<GifResult, GifError> {
+    func convertToGIF(maxResolution: CGFloat? = 300, frameDelay: CGFloat = 15.0, gifFrameRate: CGFloat = 30, gifDirURL: URL, updateProgress: @escaping (CGFloat) -> Void) async throws -> GifResult {
         let asset = AVURLAsset(url: self)
         
         guard let reader = try? AVAssetReader(asset: asset) else {
-            return .failure(.unableToReadFile)
+            throw GifError.unableToReadFile
         }
         
         guard let videoTrack = try? await asset.loadTracks(withMediaType: .video).first else {
-            return .failure(.unableToFindTrack)
+            throw GifError.unableToFindTrack
         }
         
         var videoSize = try await videoTrack.load(.naturalSize).applying(videoTrack.load(.preferredTransform))
@@ -76,21 +76,10 @@ public extension URL {
         // frame rate) rather than messing around with a complicated mapping,
         // just have a stack where we pop frame delays off as we use them
         var appliedFrameDelayStack = frameDelays
- 
-        let startTime = CFAbsoluteTimeGetCurrent()
-        let resultingFilename = "\(startTime)-Image.gif"
-        let resultingFileURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(resultingFilename)
-        
-        if FileManager.default.fileExists(atPath: resultingFileURL.path) {
-            do {
-                try FileManager.default.removeItem(at: resultingFileURL)
-            } catch {
-                print("删除目录错误: \(error)")
-            }
-        }
-        
-        guard let destination = CGImageDestinationCreateWithURL(resultingFileURL as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
-            return .failure(.unableToCreateOutput)
+        try? LiveGifTool2.createDir(dirURL: gifDirURL)
+        let gifUrl = gifDirURL.appending(component: "\(Int(Date().timeIntervalSince1970)).gif")
+        guard let destination = CGImageDestinationCreateWithURL(gifUrl as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
+            throw GifError.unableToCreateOutput
         }
         
         let fileProperties: [String: Any] = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]]
@@ -98,7 +87,7 @@ public extension URL {
         
         /// 开始遍历
         let frameProperties: [String: Any] = [
-            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: gifFps],
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFrameRate],
             kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(transform: videoTransform).rawValue
         ]
         var framesCompleted = 0
@@ -115,9 +104,6 @@ public extension URL {
             guard !appliedFrameDelayStack.isEmpty else { break }
             let frameDelay = appliedFrameDelayStack.removeFirst()
             if let newSample = sample {
-                // Create it as an optional and manually nil it out every time it's
-                // finished otherwise weird Swift bug where memory will balloon enormously
-                // (see https://twitter.com/ChristianSelig/status/1241572433095770114)
                 var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
                 framesCompleted += 1
                 if let cgImage {
@@ -129,7 +115,7 @@ public extension URL {
                 
                 cgImage = nil
                 let progress = CGFloat(framesCompleted) / CGFloat(totalFrames)
-                
+
                 /// 进度
                 Task { @MainActor in
                     updateProgress(progress)
@@ -140,9 +126,9 @@ public extension URL {
         
         let didCreateGIF = CGImageDestinationFinalize(destination)
         guard didCreateGIF else {
-            return .failure(.unknown)
+            throw GifError.unknown
         }
-        return .success(.init(url: resultingFileURL, frames: uiImages))
+        return GifResult.init(url: gifUrl, frames: uiImages)
     }
 
     private func cgImageFromSampleBuffer(_ buffer: CMSampleBuffer) -> CGImage? {

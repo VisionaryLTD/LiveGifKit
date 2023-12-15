@@ -1,6 +1,6 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by tangxiaojun on 2023/12/12.
 //
@@ -22,7 +22,7 @@ struct LiveGifTool2 {
         let videoDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: UUID().uuidString)
         
-        try? self.ensureDirectoryExists(at: videoDir)
+        try? self.createDir(dirURL: videoDir)
         
         let videoURL = videoDir.appendingPathComponent(videoResource.originalFilename)
         do {
@@ -35,15 +35,13 @@ struct LiveGifTool2 {
         return videoURL
     }
     
-    static func ensureDirectoryExists(at url: URL) throws {
-        let fileManager = FileManager.default
-        var isDirectory: ObjCBool = false
-        if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) {
-            if !isDirectory.boolValue {
-                throw NSError(domain: "The path exists but is not a directory", code: -1, userInfo: nil)
+    static func createDir(dirURL: URL) throws {
+        if !FileManager.default.fileExists(atPath: dirURL.path) {
+            do {
+                try FileManager.default.createDirectory(atPath: dirURL.path, withIntermediateDirectories: true, attributes: nil)
+            } catch {
+                throw error
             }
-        } else {
-            try fileManager.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)
         }
     }
     
@@ -71,6 +69,21 @@ struct LiveGifTool2 {
         } else if transform.a == -1.0 && transform.b == 0 && transform.c == 0 && transform.d == -1.0 {
             return .down
         } else {
+            return .up
+        }
+    }
+    
+    static func getCGImageOrientation(imageOrientation: UIImage.Orientation) -> CGImagePropertyOrientation {
+        switch imageOrientation {
+        case .up:
+            return .up
+        case .down:
+            return .down
+        case .left:
+            return .left
+        case .right:
+            return .right
+        default:
             return .up
         }
     }

@@ -14,60 +14,63 @@ import _PhotosUI_SwiftUI
 public struct GifResult {
     public let url: URL
     public let frames: [UIImage]
-    
     public var data: Data {
         try! Data(contentsOf: url)
     }
 }
 
-public enum GifError: Error {
-    case unableToReadFile
-    case unableToFindTrack
-    case unableToCreateOutput
-    case unknown
-    case unableToFindvideoUrl
-    case gifResultNil
-}
 
-public protocol GifTool {
-    func saveToAlbum(from url: URL, albumName: String?) async throws -> Bool
-    func createGif(pickerItem: PhotosPickerItem, frameDelay: CGFloat, gifFps: CGFloat) async throws -> Result<GifResult, GifError>
-    func createGif(frames: [UIImage], frameDelay: CGFloat) async throws -> Result<GifResult, GifError>
+
+protocol GifTool {
+    func save(method: Method) async throws
+    func createGif(livePhoto: PHLivePhoto, frameDelay: CGFloat, gifFrameRate: CGFloat) async throws -> GifResult
+    func createGif(frames: [UIImage], gifFrameRate: CGFloat) async throws -> GifResult
     func cleanup()
 }
 
 public class LiveGifTool: GifTool {
-    public static let shared = LiveGifTool()
-    
-    public func saveToAlbum(from url: URL, albumName: String?) async throws -> Bool {
-        return false
+    let gifTempDir: URL
+    public init() {
+        self.gifTempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "Gif/" + UUID().uuidString)
     }
-    
-    public func createGif(pickerItem: PhotosPickerItem, frameDelay: CGFloat = 15, gifFps: CGFloat) async throws -> Result<GifResult, GifError> {
-        if let livePhoto = try? await pickerItem.loadTransferable(type: PHLivePhoto.self) {
-            let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto)
-            guard let videoUrl = videoUrl else { return .failure(.unableToFindvideoUrl) }
-            guard let result = try? await videoUrl.convertToGIF(maxResolution: 300, frameDelay: frameDelay, gifFps: gifFps, updateProgress: { progress in
-                print("转换进度: \(progress)")
-            }) else { return .failure(.gifResultNil) }
-            return result
-        }
-        
-        return .failure(.unknown)
-    }
-    
-    public func createGif(frames: [UIImage], frameDelay: CGFloat = 0.03) async throws -> Result<GifResult, GifError> {
+   
+    public func save(method: Method) async throws {
         do {
-            return try await frames.createGif(frameDelay: frameDelay)
+            try await AlbumTool.save(method: method)
         } catch {
-            return .failure(.unknown)
+            throw error
+        }
+    }
+    
+    public func createGif(livePhoto: PHLivePhoto, frameDelay: CGFloat = 15, gifFrameRate: CGFloat) async throws -> GifResult {
+        let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto)
+        guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
+        do {
+            let gif = try await videoUrl.convertToGIF(maxResolution: 300, frameDelay: frameDelay, gifFrameRate: gifFrameRate, gifDirURL: self.gifTempDir, updateProgress: { progress in
+                print("转换进度: \(progress)")
+            })
+            return gif
+        } catch {
+            throw error
+        }
+    }
+    
+    public func createGif(frames: [UIImage], gifFrameRate: CGFloat = 30) async throws -> GifResult {
+        do {
+            let gif = try await frames.createGif(gifFrameRate: gifFrameRate, gifDirURL: self.gifTempDir)
+            return gif
+        } catch {
+            throw error
         }
     }
     
     public func cleanup() {
-        //
-//        try FileManager.default.removeItem(at: resultingFileURL)
+        do {
+            print("删除目录: \(self.gifTempDir.path())")
+            try FileManager.default.removeItem(atPath: self.gifTempDir.path())
+        } catch {
+            print("删除目录失败: \(self.gifTempDir) \(error)")
+        }
     }
-   
 }
-

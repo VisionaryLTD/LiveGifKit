@@ -8,25 +8,25 @@
 import Foundation
 import PhotosUI
  
-public enum AlbumTool {
+enum AlbumTool {
     static let albumName = "LifeStickers"
 }
 
-public extension AlbumTool {
-    enum Method {
-        case url(URL)
-        case image(UIImage)
-        var request: PHAssetChangeRequest {
-            switch self {
-            case .url(let url):
-                return .creationRequestForAssetFromImage(atFileURL: url)!
-            case .image(let uiImage):
-                return .creationRequestForAsset(from: uiImage)
-            }
+public enum Method {
+    case url(URL)
+    case image(UIImage)
+    var request: PHAssetChangeRequest {
+        switch self {
+        case .url(let url):
+            return .creationRequestForAssetFromImage(atFileURL: url)!
+        case .image(let uiImage):
+            return .creationRequestForAsset(from: uiImage)
         }
     }
-    
-    static func save(method: Method) async throws -> String {
+}
+
+extension AlbumTool {
+    static func save(method: Method) async throws {
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         switch status {
         case .authorized:
@@ -39,19 +39,23 @@ public extension AlbumTool {
                     let enumeration: NSArray = [assetPlaceHolder!]
                     albumChangeRequest!.addAssets(enumeration)
                 }
-                return "成功保存"
             }
             catch {
-                return "保存失败"
+                throw AlbumToolError.saveFail
             }
-            
+        case .denied:
+            throw AlbumToolError.denied
+        case .notDetermined:
+            throw AlbumToolError.notDetermined
+        case .limited:
+            throw AlbumToolError.limited
         default:
-            return "相册权限不够"
+            throw AlbumToolError.unknown
         }
     }
 }
     
-public extension AlbumTool {
+extension AlbumTool {
     static func album(name: String) -> PHAssetCollection? {
         let fetchOptions = PHFetchOptions()
         fetchOptions.predicate = NSPredicate(format: "title = %@", name)
