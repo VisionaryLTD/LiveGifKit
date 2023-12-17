@@ -13,6 +13,8 @@ import Photos
 
 struct ContentView: View {
     @State var photoItem: PhotosPickerItem?
+    
+    /// 选择相册的flag
     @State var showPicker: Bool = false
     @State var images = [UIImage]()
     @State var gifUrl: URL?
