@@ -82,18 +82,12 @@ extension URL {
             throw GifError.unableToCreateOutput
         }
         
-        let fileProperties: [String: Any] = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]]
-        CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
-        
-        /// 开始遍历
-        let frameProperties: [String: Any] = [
-            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFPS],
-//            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(transform: videoTransform).rawValue
-        ]
         var framesCompleted = 0
         var currentFrameIndex = 0
         var uiImages: [UIImage] = []
         var sample: CMSampleBuffer? = readerOutput.copyNextSampleBuffer()
+        let startTime = CFAbsoluteTimeGetCurrent()
+        var cgImages: [CGImage] = []
         while sample != nil {
             currentFrameIndex += 1
             if framesToRemove.contains(currentFrameIndex) {
@@ -105,24 +99,37 @@ extension URL {
             let frameDelay = appliedFrameDelayStack.removeFirst()
             if let newSample = sample {
                 var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
-                framesCompleted += 1
-                if let cgImage {
-                    if let cgImage = await cgImage.removeBackground() {
-                        var uiImage = UIImage(cgImage: cgImage, scale: 1, orientation: LiveGifTool2.getUIImageOrientation(transform: videoTransform))
-                        if let watermark = watermark {
-                            uiImage = uiImage.watermark(watermark: watermark)
-                        }
-                        
-                        CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
-                        uiImages.append(uiImage)
-                    }
+                if let cgImage = cgImage  {
+                    cgImages.append(cgImage)
                 }
-                
                 cgImage = nil
             }
             sample = readerOutput.copyNextSampleBuffer()
         }
+        let endTime = CFAbsoluteTimeGetCurrent()
+        print("取图片耗时: \(endTime - startTime)")
         
+        let fileProperties: [String: Any] = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]]
+        CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
+        
+        /// 开始遍历
+        let frameProperties: [String: Any] = [
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFPS],
+            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(transform: videoTransform).rawValue
+        ]
+        let newCGImages = await self.removeBgColor(images: cgImages)
+        for cgImage in newCGImages {
+            var uiImage = UIImage(cgImage: cgImage, scale: 1, orientation: LiveGifTool2.getUIImageOrientation(transform: videoTransform))
+            if let watermark = watermark {
+                uiImage = uiImage.watermark(watermark: watermark)
+            }
+            
+            CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
+            uiImages.append(uiImage)
+        }
+        let endTime2 = CFAbsoluteTimeGetCurrent()
+        print("合成GIF耗时: \(endTime2 - endTime)")
+        print("总耗时: \(endTime2 - startTime)")
         let didCreateGIF = CGImageDestinationFinalize(destination)
         guard didCreateGIF else {
             throw GifError.unknown
@@ -218,39 +225,30 @@ extension URL {
         
         return frameDelays
     }
+    
+    /// 批量移除背景
+    public func removeBgColor(images: [CGImage]) async -> [CGImage] {
+        let tasks = images.map { image in
+            Task { () -> CGImage? in
+                return await image.removeBackground()
+            }
+        }
+        return await withTaskCancellationHandler {
+            var newImages: [CGImage] = []
+            for task in tasks {
+                if let value = await task.value {
+                    newImages.append(value)
+                }
+            }
+            let rect = await newImages.commonBoundingBox()!
+            newImages = newImages.cropImages(toRect: rect)
+            return newImages
+        } onCancel: {
+            tasks.forEach { task in
+                task.cancel()
+            }
+        }
+    }
 }
 
-//水印
-func addWatermark(to cgImage: CGImage, withText text: String) -> CGImage? {
-    // Set the font and text color
-    let font = UIFont.boldSystemFont(ofSize: 32)
-    let color = UIColor.red.cgColor
-
-    // Create a new image context
-    let width = cgImage.width
-    let height = cgImage.height
-    let bytesPerRow = cgImage.bytesPerRow
-    let bitsPerComponent = cgImage.bitsPerComponent
-    let colorSpace = cgImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-    let bitmapInfo = cgImage.bitmapInfo
-    let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)!
-
-    // Set the image data
-    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-    // Create a text layer and add it to the context
-    let attributedString = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
-    let textHeight = attributedString.boundingRect(with: CGSize(width: width, height: height), options: [.usesLineFragmentOrigin], context: nil).height
-    let textPosition = CGPoint(x: 20, y: 20)
-    let textLine = CTLineCreateWithAttributedString(attributedString)
-    let textBounds = CTLineGetBoundsWithOptions(textLine, CTLineBoundsOptions.useOpticalBounds)
-
-    let framesetter = CTFramesetterCreateWithAttributedString(attributedString)
-    let path = CGMutablePath()
-    path.addRect(CGRect(x: 0, y: 0, width: 200, height: 50), transform: .identity)
-    let frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, attributedString.length), path, nil)
-    CTFrameDraw(frame, context)
-
-    // Create a new CGImage from the context
-    return context.makeImage()
-}
+ 
