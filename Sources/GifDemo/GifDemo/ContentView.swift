@@ -12,6 +12,7 @@ import Kingfisher
 import Photos
 
 struct ContentView: View {
+    /// 相册Item
     @State var photoItem: PhotosPickerItem?
     
     /// 选择相册的flag
@@ -62,11 +63,7 @@ struct ContentView: View {
  
             Button {
                 Task {
-                    do {
-                        try await self.gifTool?.save(method: .url(self.gifUrl!))
-                    } catch {
-                        print("失败: \(error)")
-                    }
+                    try? await self.gifTool?.save(method: .url(self.gifUrl!))
                 }
             } label: {
                 Text("保存照片\(self.saveStatus)")
@@ -74,13 +71,12 @@ struct ContentView: View {
             
             Button {
                 Task {
-                    do {
-                        let gif = try await self.gifTool?.createGif(frames: self.images, gifFrameRate: self.giffps)
-                        self.gifUrl = gif?.url
-                        print("新的URL: \(String(describing: self.gifUrl))")
-                    } catch {
-                        print("失败: \(error)")
-                    }
+                    let startTime = CFAbsoluteTimeGetCurrent()
+                    let gif = try? await self.gifTool?.createGif(frames: self.images, gifFPS: self.giffps)
+                    self.gifUrl = gif?.url
+                    let endTime = CFAbsoluteTimeGetCurrent()
+                    self.totalTime = endTime - startTime
+                    print("新的URL: \(String(describing: self.gifUrl))")
                 }
             } label: {
                 Text("重新生成")
@@ -93,7 +89,8 @@ struct ContentView: View {
                             Image(uiImage: image)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
-                                .frame(width: 300)
+                                
+                                .background(.gray)
                         }
                     })
                 }
@@ -111,7 +108,7 @@ struct ContentView: View {
                 print("开始：\(Date())")
                 let startTime = CFAbsoluteTimeGetCurrent()
                 do {
-                    let gif = try await self.gifTool?.createGif(livePhoto: livePhoto, gifFrameRate: self.giffps)
+                    let gif = try await self.gifTool?.createGif(livePhoto: livePhoto, livePhotoFPS: self.fps, gifFPS: self.giffps)
                     let endTime = CFAbsoluteTimeGetCurrent()
                     self.gifUrl = gif?.url
                     self.photoItem = nil

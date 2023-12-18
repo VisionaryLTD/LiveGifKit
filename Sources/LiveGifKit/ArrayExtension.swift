@@ -13,7 +13,7 @@ import CoreText
 import UIKit
 
 extension Array where Element == UIImage {
-    public func createGif(gifFrameRate: CGFloat = 30, gifDirURL: URL) async throws -> GifResult {
+    public func createGif(gifFPS: CGFloat, gifDirURL: URL, watermark: WatermarkConfig?) async throws -> GifResult {
         try? LiveGifTool2.createDir(dirURL: gifDirURL)
         let gifFileName = "\(Int(Date().timeIntervalSince1970)).gif"
         let gifURL = gifDirURL.appending(path: gifFileName)
@@ -26,12 +26,15 @@ extension Array where Element == UIImage {
             kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]
         ]
         let frameProperties: [String: Any] = [
-            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFrameRate],
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFPS],
             kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(imageOrientation: self.first?.imageOrientation ?? .right).rawValue
         ]
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
       
-        for image in self {
+        for var image in self {
+            if let watermark = watermark {
+                image = image.watermark(watermark: watermark)
+            }
             CGImageDestinationAddImage(destination, image.cgImage!, frameProperties as CFDictionary)
         }
         let didCreateGIF = CGImageDestinationFinalize(destination)

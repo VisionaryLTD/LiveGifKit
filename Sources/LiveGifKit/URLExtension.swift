@@ -13,7 +13,7 @@ import CoreText
 
 extension URL {
     // swiftlint:disable:next function_body_length cyclomatic_complexity
-    func convertToGIF(maxResolution: CGFloat? = 300, frameDelay: CGFloat = 15.0, gifFrameRate: CGFloat = 30, gifDirURL: URL, updateProgress: @escaping (CGFloat) -> Void) async throws -> GifResult {
+    func convertToGIF(maxResolution: CGFloat? = 300, livePhotoFPS: CGFloat, gifFPS: CGFloat, gifDirURL: URL, watermark: WatermarkConfig?) async throws -> GifResult {
         let asset = AVURLAsset(url: self)
         
         guard let reader = try? AVAssetReader(asset: asset) else {
@@ -51,7 +51,7 @@ extension URL {
         
         // In order to convert from, say 30 FPS to 20, we'd need to remove 1/3 of the frames, this applies that math and decides which frames to remove/not process
         
-        let framesToRemove = calculateFramesToRemove(desiredFrameRate: frameDelay, nominalFrameRate: nominalFrameRate, nominalTotalFrames: nominalTotalFrames)
+        let framesToRemove = calculateFramesToRemove(desiredFrameRate: livePhotoFPS, nominalFrameRate: nominalFrameRate, nominalTotalFrames: nominalTotalFrames)
         
         let totalFrames = nominalTotalFrames - framesToRemove.count
         
@@ -68,7 +68,7 @@ extension URL {
         
         // An array where each index corresponds to the delay for that frame in seconds.
         // Note that since it's regarding frames, the first frame would be the 0th index in the array.
-        let frameDelays = calculateFrameDelays(desiredFrameRate: frameDelay, nominalFrameRate: nominalFrameRate, totalFrames: totalFrames)
+        let frameDelays = calculateFrameDelays(desiredFrameRate: livePhotoFPS, nominalFrameRate: nominalFrameRate, totalFrames: totalFrames)
         
         // Since there can be a disjoint mapping between frame delays
         // and the frames in the video/pixel buffer (if we're lowering
@@ -87,8 +87,8 @@ extension URL {
         
         /// 开始遍历
         let frameProperties: [String: Any] = [
-            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFrameRate],
-            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(transform: videoTransform).rawValue
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFPS],
+//            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(transform: videoTransform).rawValue
         ]
         var framesCompleted = 0
         var currentFrameIndex = 0
@@ -108,18 +108,17 @@ extension URL {
                 framesCompleted += 1
                 if let cgImage {
                     if let cgImage = await cgImage.removeBackground() {
-                        uiImages.append(UIImage(cgImage: cgImage, scale: 1, orientation: LiveGifTool2.getUIImageOrientation(transform: videoTransform)))
-                        CGImageDestinationAddImage(destination, cgImage, frameProperties as CFDictionary)
+                        var uiImage = UIImage(cgImage: cgImage, scale: 1, orientation: LiveGifTool2.getUIImageOrientation(transform: videoTransform))
+                        if let watermark = watermark {
+                            uiImage = uiImage.watermark(watermark: watermark)
+                        }
+                        
+                        CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
+                        uiImages.append(uiImage)
                     }
                 }
                 
                 cgImage = nil
-                let progress = CGFloat(framesCompleted) / CGFloat(totalFrames)
-
-                /// 进度
-                Task { @MainActor in
-                    updateProgress(progress)
-                }
             }
             sample = readerOutput.copyNextSampleBuffer()
         }
