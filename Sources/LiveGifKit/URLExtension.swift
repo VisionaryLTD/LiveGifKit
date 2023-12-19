@@ -1,5 +1,5 @@
 //
-//  File.swift
+//  URLExtension.swift
 //
 //
 //  Created by tangxiaojun on 2023/12/11.
@@ -12,8 +12,9 @@ import UniformTypeIdentifiers
 import CoreText
 
 extension URL {
-    // swiftlint:disable:next function_body_length cyclomatic_complexity
+    /// 创建GIF
     func convertToGIF(maxResolution: CGFloat? = 300, livePhotoFPS: CGFloat, gifFPS: CGFloat, gifDirURL: URL, watermark: WatermarkConfig?) async throws -> GifResult {
+         
         let asset = AVURLAsset(url: self)
         
         guard let reader = try? AVAssetReader(asset: asset) else {
@@ -76,6 +77,7 @@ extension URL {
         // frame rate) rather than messing around with a complicated mapping,
         // just have a stack where we pop frame delays off as we use them
         var appliedFrameDelayStack = frameDelays
+         
         try? LiveGifTool2.createDir(dirURL: gifDirURL)
         let gifUrl = gifDirURL.appending(component: "\(Int(Date().timeIntervalSince1970)).gif")
         guard let destination = CGImageDestinationCreateWithURL(gifUrl as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
@@ -106,8 +108,6 @@ extension URL {
             }
             sample = readerOutput.copyNextSampleBuffer()
         }
-        let endTime = CFAbsoluteTimeGetCurrent()
-        print("取图片耗时: \(endTime - startTime)")
         
         let fileProperties: [String: Any] = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]]
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
@@ -115,9 +115,10 @@ extension URL {
         /// 开始遍历
         let frameProperties: [String: Any] = [
             kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFPS],
-            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(transform: videoTransform).rawValue
         ]
-        let newCGImages = await self.removeBgColor(images: cgImages)
+        
+        let newCGImages = try await self.removeBgColor(images: cgImages)
+        try Task.checkCancellation()
         for cgImage in newCGImages {
             var uiImage = UIImage(cgImage: cgImage, scale: 1, orientation: LiveGifTool2.getUIImageOrientation(transform: videoTransform))
             if let watermark = watermark {
@@ -127,9 +128,8 @@ extension URL {
             CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
             uiImages.append(uiImage)
         }
-        let endTime2 = CFAbsoluteTimeGetCurrent()
-        print("合成GIF耗时: \(endTime2 - endTime)")
-        print("总耗时: \(endTime2 - startTime)")
+        try Task.checkCancellation()
+  
         let didCreateGIF = CGImageDestinationFinalize(destination)
         guard didCreateGIF else {
             throw GifError.unknown
@@ -227,16 +227,17 @@ extension URL {
     }
     
     /// 批量移除背景
-    public func removeBgColor(images: [CGImage]) async -> [CGImage] {
+    public func removeBgColor(images: [CGImage]) async throws -> [CGImage] {
         let tasks = images.map { image in
             Task { () -> CGImage? in
                 return await image.removeBackground()
             }
         }
-        return await withTaskCancellationHandler {
+        return try await withTaskCancellationHandler {
             var newImages: [CGImage] = []
-            for task in tasks {
+            for try task in tasks {
                 if let value = await task.value {
+                    try Task.checkCancellation()
                     newImages.append(value)
                 }
             }
@@ -252,3 +253,4 @@ extension URL {
 }
 
  
+    

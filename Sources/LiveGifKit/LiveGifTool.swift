@@ -51,7 +51,7 @@ public class LiveGifTool: GifTool {
     ///
     /// watermark: 水印配置 默认为nil
     public func createGif(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat = 15, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil) async throws -> GifResult {
-        let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto)
+        let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
         guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
         do {
             let gif = try await videoUrl.convertToGIF(maxResolution: 300, livePhotoFPS: livePhotoFPS, gifFPS: gifFPS, gifDirURL: self.gifTempDir, watermark: watermark)

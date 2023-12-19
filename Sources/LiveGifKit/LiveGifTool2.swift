@@ -13,18 +13,15 @@ import _PhotosUI_SwiftUI
 
 struct LiveGifTool2 {
     /// 转成视频
-    static func livePhotoConvertToVideo(livePhoto: PHLivePhoto) async throws -> URL? {
+    static func livePhotoConvertToVideo(livePhoto: PHLivePhoto, tempDir: URL) async throws -> URL? {
         let resources = PHAssetResource.assetResources(for: livePhoto)
         guard let videoResource = resources.first(where: { $0.type == .pairedVideo }) else {
             return nil
         }
         
-        let videoDir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appending(path: UUID().uuidString)
-        
-        try? self.createDir(dirURL: videoDir)
-        
-        let videoURL = videoDir.appendingPathComponent(videoResource.originalFilename)
+        try? self.createDir(dirURL: tempDir)
+        let videoURL = tempDir.appendingPathComponent("\(Date())" + videoResource.originalFilename)
+        print("视频临时目录: \(videoURL)")
         do {
             try await PHAssetResourceManager.default().writeData(for: videoResource, toFile: videoURL, options: nil)
         } catch {

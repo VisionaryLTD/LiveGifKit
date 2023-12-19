@@ -13,7 +13,7 @@ import CoreText
 import UIKit
 
 extension Array where Element == UIImage {
-    public func createGif(gifFPS: CGFloat, gifDirURL: URL, watermark: WatermarkConfig?) async throws -> GifResult {
+    public func createGif(gifFPS: CGFloat, gifDirURL: URL, watermark: WatermarkConfig?) throws -> GifResult {
         try? LiveGifTool2.createDir(dirURL: gifDirURL)
         let gifFileName = "\(Int(Date().timeIntervalSince1970)).gif"
         let gifURL = gifDirURL.appending(path: gifFileName)
