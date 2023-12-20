@@ -32,7 +32,6 @@ public struct WatermarkConfig {
 
 public extension UIImage {
     func watermark(watermark: WatermarkConfig) -> UIImage {
-        print("开始的方向: \(self.imageOrientation)")
         let imageOrientation = self.imageOrientation
         let textAttributes = [NSAttributedString.Key.foregroundColor:watermark.textColor,
                               NSAttributedString.Key.font:watermark.font,
@@ -47,14 +46,20 @@ public extension UIImage {
         
         guard var newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
         UIGraphicsEndImageContext()
-//        newImage = UIImage(cgImage: newImage.cgImage!, scale: newImage.scale, orientation: imageOrientation)
-//        print("结束的方向: \(newImage.imageOrientation)")
+        return newImage
+    }
+    
+    func adjustOrientation() -> UIImage {
+        let imageSize = self.size
+        UIGraphicsBeginImageContext(imageSize)
+        self.draw(in: CGRectMake(0, 0, imageSize.width, imageSize.height))
+        guard var newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
+        UIGraphicsEndImageContext()
         return newImage
     }
 }
 
 public enum WatermarkLocation: String, CaseIterable {
-    
     case topLeft
     case topRight
     case bottomLeft

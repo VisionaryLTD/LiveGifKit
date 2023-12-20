@@ -123,6 +123,8 @@ extension URL {
             var uiImage = UIImage(cgImage: cgImage, scale: 1, orientation: LiveGifTool2.getUIImageOrientation(transform: videoTransform))
             if let watermark = watermark {
                 uiImage = uiImage.watermark(watermark: watermark)
+            } else {
+                uiImage = uiImage.adjustOrientation()
             }
             
             CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)

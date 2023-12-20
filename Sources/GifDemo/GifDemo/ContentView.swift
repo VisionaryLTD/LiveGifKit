@@ -82,7 +82,9 @@ struct ContentView: View {
                 } label: {
                     Text("删除目录")
                 }.padding()
-                
+                if self.recommendImages.count == -100 {
+                    Text("推荐sfdf")
+                }
                 Button {
                     self.recommendImages = FetchPhoto.fetch()
                     print("推荐图片的个数: \(self.recommendImages.count)")
@@ -124,11 +126,14 @@ struct ContentView: View {
             
             Button {
                 Task {
-                    let startTime = CFAbsoluteTimeGetCurrent()
-                    let gif = try? await self.gifTool?.createGif(frames: self.images, gifFPS: self.giffps)
+                    var waterConfig: WatermarkConfig? = nil
+                    if self.watermarkText.count > 0 {
+                        waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
+                    }
+                    let parameter = GifToolParameter(data: .images(frames: self.images), gifFPS: self.giffps, watermark: waterConfig)
+                    let gif = try? await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
-                    let endTime = CFAbsoluteTimeGetCurrent()
-                    self.totalTime = endTime - startTime
+                    self.totalTime = gif?.totalTime ?? 0
                     print("新的URL: \(String(describing: self.gifUrl))")
                 }
             } label: {
@@ -154,25 +159,26 @@ struct ContentView: View {
         })
         .onChange(of: self.photoItem) {
             Task {
-                var waterConfig: WatermarkConfig? = nil
-                if self.watermarkText.count > 0 {
-                    waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
-                }
                 guard let photoItem = self.photoItem else { return }
                 guard let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self)  else { return }
                 self.showPicker.toggle()
-                print("开始：\(Date())")
-                let startTime = CFAbsoluteTimeGetCurrent()
                 do {
-                    let gif = try await self.gifTool?.createGif(livePhoto: livePhoto, livePhotoFPS: self.fps, gifFPS: self.giffps, watermark: waterConfig)
-                    let endTime = CFAbsoluteTimeGetCurrent()
+                    var waterConfig: WatermarkConfig? = nil
+                    if self.watermarkText.count > 0 {
+                        waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
+                    }
+                    
+                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig)
+                    let gif = try await self.gifTool?.createGif(parameter: parameter)
+
                     self.gifUrl = gif?.url
                     self.photoItem = nil
                     self.images = gif?.frames ?? []
-                    self.totalTime = endTime - startTime
+                    self.totalTime = gif?.totalTime ?? 0
                     print("首次URL: \(String(describing: self.gifUrl))")
                 } catch {
                     print("异常: \(error)")
+                    self.photoItem = nil
                 }
             }
         }

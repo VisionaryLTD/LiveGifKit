@@ -11,64 +11,103 @@ import Photos
 import PhotosUI
 import _PhotosUI_SwiftUI
 
+/// 生成的GIF
 public struct GifResult {
     public let url: URL
     public let frames: [UIImage]
     public var data: Data {
         try! Data(contentsOf: url)
     }
+    
+#if DEBUG
+    public var totalTime: Double = 0
+#endif
+}
+
+/// 生成Gif的参数Model
+///
+///gifFPS: gif帧率 默认 30
+///watermarkInfo: 水印信息 默认为空
+///data: DataSource、livePhoto和图片两种方式
+///maxResolution: 图片大小 默认300
+public struct GifToolParameter {
+    var data: DataSource
+    var gifFPS: CGFloat = 30
+    var watermark: WatermarkConfig? = nil
+    var maxResolution: CGFloat? = 300 /// 图片大小
+    public enum DataSource {
+        case livePhoto(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat = 30)
+        case images(frames: [UIImage])
+    }
+    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat? = 300) {
+        self.gifFPS = gifFPS
+        self.watermark = watermark
+        self.data = data
+        self.maxResolution = maxResolution
+    }
 }
 
 protocol GifTool {
     func save(method: Method) async throws
-    func createGif(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat, gifFPS: CGFloat, watermark: WatermarkConfig?) async throws -> GifResult
-    func createGif(frames: [UIImage], gifFPS: CGFloat, watermark: WatermarkConfig?) async throws -> GifResult
+    func createGif(parameter: GifToolParameter) async throws -> GifResult
     func cleanup()
 }
 
 public class LiveGifTool: GifTool {
+    var parameter: GifToolParameter!
+    var gifTempDir: URL
     
-    let gifTempDir: URL
     public init() {
         self.gifTempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "Gif/" + UUID().uuidString)
     }
-   
-    /// 保存相册
-    public func save(method: Method) async throws {
-        do {
-            try await AlbumTool.save(method: method)
-        } catch {
-            throw error
+    
+    /// 生成GIF
+    ///
+    /// - parameter: GifToolParameter
+    /// - gifFPS: gif帧率 默认 30
+    /// - watermarkInfo: 水印信息 默认为空
+    /// - data: livePhoto、images 两种方式
+    /// - maxResolution: 图片大小 默认300
+    public func createGif(parameter: GifToolParameter) async throws -> GifResult {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        self.parameter = parameter
+        switch parameter.data {
+        case .livePhoto(let livePhoto, let livePhotoFPS):
+            var result = try await self.createLivePhotoGif(livePhoto: livePhoto, livePhotoFPS: livePhotoFPS)
+#if DEBUG
+            result.totalTime = CFAbsoluteTimeGetCurrent() - startTime
+#endif
+            return result
+        case .images(let frames):
+            var result =  try await self.createImagesGif(images: frames)
+#if DEBUG
+            result.totalTime = CFAbsoluteTimeGetCurrent() - startTime
+#endif
+            return result
         }
     }
     
-    /// 通过PHLivePhoto创建GIF
+    /// 通过LivePhoto 合成GIF
     ///
-    /// livePhotoFPS: PHLivePhoto帧率 默认每秒 15
-    ///
-    /// gifFPS: 合成的GIF帧率 默认 30
-    ///
-    /// watermark: 水印配置 默认为nil
-    public func createGif(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat = 15, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil) async throws -> GifResult {
+    ///livePhoto: PHLivePhoto
+    ///PHLivePhoto: PHLivePhoto帧率
+    private func createLivePhotoGif(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat) async throws -> GifResult {
         let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
         guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
         do {
-            let gif = try await videoUrl.convertToGIF(maxResolution: 300, livePhotoFPS: livePhotoFPS, gifFPS: gifFPS, gifDirURL: self.gifTempDir, watermark: watermark)
+            let gif = try await videoUrl.convertToGIF(maxResolution: self.parameter.maxResolution, livePhotoFPS: livePhotoFPS, gifFPS: self.parameter.gifFPS, gifDirURL: self.gifTempDir, watermark: self.parameter.watermark)
             return gif
         } catch {
             throw error
         }
     }
-    
     /// 通过图片合成GIF
     ///
-    /// gifFPS: 合成的GIF帧率 默认 30
-    ///
-    /// watermark: 水印配置 默认为nil
-    public func createGif(frames: [UIImage], gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil) async throws -> GifResult {
+    /// images: GIF帧数组
+    private func createImagesGif(images: [UIImage]) async throws -> GifResult {
         do {
-            let gif = try await frames.createGif(gifFPS: gifFPS, gifDirURL: self.gifTempDir, watermark: watermark)
+            let gif = try images.createGif(gifFPS: self.parameter.gifFPS, gifDirURL: self.gifTempDir, watermark: self.parameter.watermark)
             return gif
         } catch {
             throw error
@@ -82,6 +121,15 @@ public class LiveGifTool: GifTool {
             try FileManager.default.removeItem(atPath: self.gifTempDir.path())
         } catch {
             print("删除目录失败: \(self.gifTempDir) \(error)")
+        }
+    }
+    
+    /// 保存相册
+    public func save(method: Method) async throws {
+        do {
+            try await AlbumTool.save(method: method)
+        } catch {
+            throw error
         }
     }
 }
