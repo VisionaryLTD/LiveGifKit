@@ -44,3 +44,38 @@ extension Array where Element == UIImage {
         return GifResult.init(url: gifURL, frames: self)
     }
 }
+
+ 
+public extension UIImage {
+    func resize(scale: CGFloat = 0.5) -> UIImage {
+//        let image = UIImage(named: "myImage")
+//        let scaledImage = UIImage(cgImage: image!.cgImage!, scale: 2.0, orientation: .up)
+//        let resizedImage = scaledImage.resized(to: CGSize(width: 50, height: 50))
+        
+//        let size = self.size
+//        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+//        return UIGraphicsImageRenderer(size: newSize).image { _ in
+//            self.draw(in: CGRect(origin: .zero, size: newSize))
+//        }
+        let size = self.size
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let rect = CGRect(x: 0, y: 0, width: newSize.width, height: newSize.height)
+        
+        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+        self.draw(in: rect)
+        let newImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        return newImage ?? self
+    }
+     
+   
+    
+    func resize(width: CGFloat = 1, height: CGFloat = 1) -> UIImage {
+        let widthRatio  = width  / size.width
+        let heightRatio = height / size.height
+        let scalingFactor = max(widthRatio, heightRatio)
+        
+        return resize(scale: scalingFactor)
+    }
+}

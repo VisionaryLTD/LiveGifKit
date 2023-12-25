@@ -35,15 +35,17 @@ public struct GifToolParameter {
     var gifFPS: CGFloat = 30
     var watermark: WatermarkConfig? = nil
     var maxResolution: CGFloat? = 300 /// 图片大小
+    var mode = false
     public enum DataSource {
         case livePhoto(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat = 30)
         case images(frames: [UIImage])
     }
-    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat? = 300) {
+    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat? = 500, mode: Bool = false) {
         self.gifFPS = gifFPS
         self.watermark = watermark
         self.data = data
         self.maxResolution = maxResolution
+        self.mode = mode
     }
 }
 
@@ -93,6 +95,9 @@ public class LiveGifTool: GifTool {
     ///livePhoto: PHLivePhoto
     ///PHLivePhoto: PHLivePhoto帧率
     private func createLivePhotoGif(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat) async throws -> GifResult {
+        if self.parameter.mode == true {
+            return try await self.secondMode(livePhoto: livePhoto)
+        }
         let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
         guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
         do {
@@ -101,6 +106,18 @@ public class LiveGifTool: GifTool {
         } catch {
             throw error
         }
+      
+    }
+    
+    public func secondMode(livePhoto: PHLivePhoto) async throws -> GifResult {
+        var config = StickerAttributes()
+        config.fps = self.parameter.gifFPS
+        config.animated = true
+        config.resizedWidth = self.parameter.maxResolution ?? 300
+        let converter = LivePhotoToFramesConverter(livePhoto: livePhoto, attributes: config)
+        let frames = try await converter.convert()
+        let gif = try await self.createImagesGif(images: frames)
+        return gif
     }
     /// 通过图片合成GIF
     ///

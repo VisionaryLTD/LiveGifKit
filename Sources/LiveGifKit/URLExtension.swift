@@ -16,7 +16,7 @@ extension URL {
     func convertToGIF(maxResolution: CGFloat? = 300, livePhotoFPS: CGFloat, gifFPS: CGFloat, gifDirURL: URL, watermark: WatermarkConfig?) async throws -> GifResult {
          
         let asset = AVURLAsset(url: self)
-        
+//        print("视频方向； \(getVideoPreviewImageOrientation(for: self))")
         guard let reader = try? AVAssetReader(asset: asset) else {
             throw GifError.unableToReadFile
         }
@@ -55,7 +55,7 @@ extension URL {
         let framesToRemove = calculateFramesToRemove(desiredFrameRate: livePhotoFPS, nominalFrameRate: nominalFrameRate, nominalTotalFrames: nominalTotalFrames)
         
         let totalFrames = nominalTotalFrames - framesToRemove.count
-        
+        print("移除的帧个数； \(framesToRemove.count)  总帧的个数: \(totalFrames)")
         let outputSettings: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
             kCVPixelBufferWidthKey as String: resultingSize.width,
@@ -83,7 +83,8 @@ extension URL {
         guard let destination = CGImageDestinationCreateWithURL(gifUrl as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
             throw GifError.unableToCreateOutput
         }
-        
+        let orientation: UIImage.Orientation = LiveGifTool2.getUIImageOrientation(transform: videoTransform)
+        print("图片方向； \(orientation)")
         var framesCompleted = 0
         var currentFrameIndex = 0
         var uiImages: [UIImage] = []
@@ -99,16 +100,24 @@ extension URL {
  
             guard !appliedFrameDelayStack.isEmpty else { break }
             let frameDelay = appliedFrameDelayStack.removeFirst()
-            if let newSample = sample {
-                var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
-                if let cgImage = cgImage  {
-                    cgImages.append(cgImage)
+            autoreleasepool {
+                if let newSample = sample {
+                    var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
+                    
+                    if var cgImage = cgImage  {
+//                        cgImage = cgImage.resizeCGImage(cgImage, targetSize: resultingSize)
+                        var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: .up)
+//                        ui = ui.resize(targetSize: resultingSize)
+                        ui = ui.resize(width: maxResolution ?? 300)
+                        cgImages.append(cgImage)
+                    }
+                    cgImage = nil
                 }
-                cgImage = nil
+                sample = readerOutput.copyNextSampleBuffer()
             }
-            sample = readerOutput.copyNextSampleBuffer()
         }
-        
+        let endTime = CFAbsoluteTimeGetCurrent()
+        print("获取帧耗时: \(endTime - startTime)")
         let fileProperties: [String: Any] = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]]
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
         
@@ -119,19 +128,19 @@ extension URL {
         
         let newCGImages = try await self.removeBgColor(images: cgImages)
         try Task.checkCancellation()
+        let endTime2 = CFAbsoluteTimeGetCurrent()
+        print("去背景耗时: \(endTime2 - endTime)")
         for cgImage in newCGImages {
-            var uiImage = UIImage(cgImage: cgImage, scale: 1, orientation: LiveGifTool2.getUIImageOrientation(transform: videoTransform))
+            var uiImage = UIImage(cgImage: cgImage)
             if let watermark = watermark {
                 uiImage = uiImage.watermark(watermark: watermark)
-            } else {
-                uiImage = uiImage.adjustOrientation()
             }
-            
-            CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
             uiImages.append(uiImage)
+            CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
         }
         try Task.checkCancellation()
-  
+        let endTime3 = CFAbsoluteTimeGetCurrent()
+        print("合成GIF耗时: \(endTime3 - endTime2)")
         let didCreateGIF = CGImageDestinationFinalize(destination)
         guard didCreateGIF else {
             throw GifError.unknown
@@ -256,3 +265,77 @@ extension URL {
 
  
     
+
+extension UIImage {
+   /**
+    *  重设图片大小
+    */
+   func reSizeImage(reSize:CGSize)->UIImage {
+       //UIGraphicsBeginImageContext(reSize);
+       UIGraphicsBeginImageContextWithOptions(reSize,false, UIScreen.main.scale);
+       self.draw(in: CGRectMake(0, 0, reSize.width, reSize.height));
+       let reSizeImage :UIImage? = UIGraphicsGetImageFromCurrentImageContext();
+       UIGraphicsEndImageContext();
+       guard let reSizeImage = reSizeImage else { return self }
+       return reSizeImage;
+       
+   }
+    
+   /**
+    *  等比率缩放
+    */
+   func scaleImage(scaleSize:CGFloat)->UIImage {
+       let reSize = CGSizeMake(self.size.width * scaleSize, self.size.height * scaleSize)
+       return reSizeImage(reSize: reSize)
+   }
+}
+
+extension CGImage {
+    func resizeCGImage(_ image: CGImage, targetSize: CGSize) -> CGImage {
+        let width = Int(targetSize.width)
+        let height = Int(targetSize.height)
+        let bitsPerComponent = image.bitsPerComponent
+        let bytesPerRow = 0
+        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = image.bitmapInfo.rawValue
+        let context = CGContext(data: nil, width: width, height: height,
+                                bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow,
+                                space: colorSpace, bitmapInfo: bitmapInfo)
+        
+        let rect = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
+        context?.draw(image, in: rect)
+        let resizedImage = context?.makeImage()
+        return resizedImage ?? self
+    }
+}
+public extension UIImage {
+//    func resize(scale: CGFloat = 0.5) -> UIImage {
+//        let size = self.size
+//        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+//        let rect = CGRect(x: 0, y: 0, width: newSize.width, height: newSize.height)
+//        
+//        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+//        self.draw(in: rect)
+//        let newImage = UIGraphicsGetImageFromCurrentImageContext()
+//        UIGraphicsEndImageContext()
+//        
+//        return newImage ?? self
+//    }
+    
+    func resize(targetSize: CGSize) -> UIImage {
+        let widthRatio  = targetSize.width  / size.width
+        let heightRatio = targetSize.height / size.height
+        let scalingFactor = max(widthRatio, heightRatio)
+        
+        return resize(scale: scalingFactor)
+    }
+    
+//    func resize(width: CGFloat = 1, height: CGFloat = 1) -> UIImage {
+//        let widthRatio  = width  / size.width
+//        let heightRatio = height / size.height
+//        let scalingFactor = max(widthRatio, heightRatio)
+//        
+//        return resize(scale: scalingFactor)
+//    }
+}
+ 

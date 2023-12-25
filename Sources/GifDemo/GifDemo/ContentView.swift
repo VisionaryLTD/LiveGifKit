@@ -31,16 +31,22 @@ struct ContentView: View {
     @State var showWatermarkLocation = false
     @State var recommendImages = [UIImage]()
     @State var showRecommendUI = false
+    @State var mode = false
     var body: some View {
         VStack {
-            Slider(value: $fps, in: 5...60, step: 5)
-                .overlay(Text("LivePhoto每秒帧数(FPS): \(Int(fps))")
-                    .foregroundColor(.primary)
-                    .font(.headline)
-                    .offset(x: 0, y: -20))
+            HStack {
+                Slider(value: $fps, in: 5...60, step: 5)
+                    .overlay(Text("LP(FPS): \(Int(fps))")
+                        .foregroundColor(.primary)
+                        .font(.headline)
+                        .offset(x: 0, y: -20))
+                Spacer()
+                Toggle("切换", isOn: $mode)
+            }
+          
             
             Slider(value: $giffps, in: 5...60, step: 5)
-                .overlay(Text("GIF每秒帧数(FPS): \(Int(giffps))")
+                .overlay(Text("GIF(FPS): \(Int(giffps))")
                     .foregroundColor(.primary)
                     .font(.headline)
                     .offset(x: 0, y: -20))
@@ -65,7 +71,7 @@ struct ContentView: View {
             if gifUrl?.absoluteString.count ?? 0 > 0 {
                 KFAnimatedImage(gifUrl)
                     .scaledToFit()
-                    .frame(width: 300)
+                    .frame(width: 500)
                 
                 Text("总帧数: \(self.images.count)")
                 Text("总耗时: \(self.totalTime)")
@@ -168,7 +174,8 @@ struct ContentView: View {
                         waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
                     }
                     
-                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig)
+                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, mode: self.mode)
+                     
                     let gif = try await self.gifTool?.createGif(parameter: parameter)
 
                     self.gifUrl = gif?.url

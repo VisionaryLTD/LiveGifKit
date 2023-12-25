@@ -1,12 +1,21 @@
 {
   "pins" : [
     {
+      "identity" : "goodutils",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/grepug/GoodUtils.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "f3d57e4eafee9309326d986028b13c57225fb6e2"
+      }
+    },
+    {
       "identity" : "kingfisher",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/onevcat/Kingfisher.git",
       "state" : {
         "branch" : "master",
-        "revision" : "57143de1c45f752368f81eb14a912330131f970d"
+        "revision" : "2a931064066428d260790c46f238030180c866ef"
       }
     }
   ],

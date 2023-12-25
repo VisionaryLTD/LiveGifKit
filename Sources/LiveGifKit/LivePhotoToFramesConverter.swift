@@ -9,6 +9,23 @@ import UIKit
 import Photos
 import GoodUtils
 
+struct StickerAttributes: Hashable {
+    var fps: CGFloat = 30
+    var removingBackground = true
+    var animated = true
+//    var frameSelection: [String?] = []
+    var unselectedFrameIDs: Set<String> = []
+    var resizedWidth: CGFloat = 500
+    
+//    static func == (lhs: Self, rhs: Self) -> Bool {
+//        lhs.fps == rhs.fps &&
+//        lhs.removingBackground == rhs.removingBackground &&
+//        lhs.animated == rhs.animated &&
+//        lhs.resizedWidth == rhs.resizedWidth &&
+//        lhs.frameSelection.count == rhs.frameSelection.count
+//    }
+}
+
 enum LivePhotoToFramesConverterError: Error {
     case tooManyFrames
     
@@ -268,5 +285,21 @@ extension CIImage {
         let cgImage = context.createCGImage(self, from: extent)!
         
         return cgImage
+    }
+}
+func ensureDirectoryExists(at url: URL) throws {
+    let fileManager = FileManager.default
+
+    // Check if the directory already exists
+    var isDirectory: ObjCBool = false
+    if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+        if !isDirectory.boolValue {
+            // The path exists but it's not a directory - handle this situation as needed
+            throw NSError(domain: "The path exists but is not a directory", code: -1, userInfo: nil)
+        }
+        // Directory already exists, no further action needed
+    } else {
+        // The directory does not exist, create it
+        try fileManager.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)
     }
 }
