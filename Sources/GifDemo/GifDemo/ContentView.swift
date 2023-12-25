@@ -108,7 +108,7 @@ struct ContentView: View {
                                Image(uiImage: image)
                                    .resizable()
                                    .aspectRatio(contentMode: .fit)
-                                   .background(.gray)
+                                   .background(.yellow)
                            }
                         }
                     }
