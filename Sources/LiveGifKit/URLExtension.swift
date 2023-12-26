@@ -105,11 +105,9 @@ extension URL {
                     var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
                     
                     if var cgImage = cgImage  {
-//                        cgImage = cgImage.resizeCGImage(cgImage, targetSize: resultingSize)
-                        var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: .up)
-//                        ui = ui.resize(targetSize: resultingSize)
+                        var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: orientation)
                         ui = ui.resize(width: maxResolution ?? 300)
-                        cgImages.append(cgImage)
+                        cgImages.append(ui.cgImage!)
                     }
                     cgImage = nil
                 }

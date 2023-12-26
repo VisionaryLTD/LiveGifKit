@@ -41,7 +41,7 @@ struct ContentView: View {
                         .font(.headline)
                         .offset(x: 0, y: -20))
                 Spacer()
-                Toggle("切换", isOn: $mode)
+//                Toggle("切换", isOn: $mode)
             }
           
             
