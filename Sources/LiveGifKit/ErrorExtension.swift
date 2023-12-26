@@ -13,6 +13,7 @@ public enum GifError: Error {
     case unknown
     case unableToFindvideoUrl
     case gifResultNil
+    case tooManyFrames
 }
 
 public enum AlbumToolError: Error {

@@ -13,10 +13,8 @@ import CoreText
 
 extension URL {
     /// 创建GIF
-    func convertToGIF(maxResolution: CGFloat? = 300, livePhotoFPS: CGFloat, gifFPS: CGFloat, gifDirURL: URL, watermark: WatermarkConfig?) async throws -> GifResult {
-         
+    func convertToGIF(config: GifToolParameter) async throws -> GifResult {
         let asset = AVURLAsset(url: self)
-//        print("视频方向； \(getVideoPreviewImageOrientation(for: self))")
         guard let reader = try? AVAssetReader(asset: asset) else {
             throw GifError.unableToReadFile
         }
@@ -34,28 +32,29 @@ extension URL {
         videoSize = videoFrame.size
         let resultingSize: CGSize
         
-        if let maxResolution {
-            if videoSize.width > videoSize.height {
-                let cappedWidth = round(min(maxResolution, videoSize.width))
-                resultingSize = CGSize(width: cappedWidth, height: round(cappedWidth / aspectRatio))
-            } else {
-                let cappedHeight = round(min(maxResolution, videoSize.height))
-                resultingSize = CGSize(width: round(cappedHeight * aspectRatio), height: cappedHeight)
-            }
+        if videoSize.width > videoSize.height {
+            let cappedWidth = round(min(config.maxResolution, videoSize.width))
+            resultingSize = CGSize(width: cappedWidth, height: round(cappedWidth / aspectRatio))
         } else {
-            resultingSize = CGSize(width: videoSize.width, height: videoSize.height)
+            let cappedHeight = round(min(config.maxResolution, videoSize.height))
+            resultingSize = CGSize(width: round(cappedHeight * aspectRatio), height: cappedHeight)
         }
         print("视频大小: \(resultingSize)")
+        
         let duration: CGFloat = try await CGFloat(asset.load(.duration).seconds)
         let nominalFrameRate = try await CGFloat(videoTrack.load(.nominalFrameRate))
         let nominalTotalFrames = Int(round(duration * nominalFrameRate))
         
-        // In order to convert from, say 30 FPS to 20, we'd need to remove 1/3 of the frames, this applies that math and decides which frames to remove/not process
-        
-        let framesToRemove = calculateFramesToRemove(desiredFrameRate: livePhotoFPS, nominalFrameRate: nominalFrameRate, nominalTotalFrames: nominalTotalFrames)
-        
+        /// 计算需要舍弃的帧
+        let framesToRemove = calculateFramesToRemove(desiredFrameRate: config.livePhotoFPS, nominalFrameRate: nominalFrameRate, nominalTotalFrames: nominalTotalFrames)
         let totalFrames = nominalTotalFrames - framesToRemove.count
         print("移除的帧个数； \(framesToRemove.count)  总帧的个数: \(totalFrames)")
+        if totalFrames > 150 {
+            throw GifError.tooManyFrames
+        }
+        let frameDelays = calculateFrameDelays(desiredFrameRate: config.livePhotoFPS, nominalFrameRate: nominalFrameRate, totalFrames: totalFrames)
+        
+        /// 视频输出设置
         let outputSettings: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
             kCVPixelBufferWidthKey as String: resultingSize.width,
@@ -63,13 +62,12 @@ extension URL {
         ]
         
         let readerOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: outputSettings)
-        
         reader.add(readerOutput)
         reader.startReading()
         
         // An array where each index corresponds to the delay for that frame in seconds.
         // Note that since it's regarding frames, the first frame would be the 0th index in the array.
-        let frameDelays = calculateFrameDelays(desiredFrameRate: livePhotoFPS, nominalFrameRate: nominalFrameRate, totalFrames: totalFrames)
+     
         
         // Since there can be a disjoint mapping between frame delays
         // and the frames in the video/pixel buffer (if we're lowering
@@ -78,18 +76,18 @@ extension URL {
         // just have a stack where we pop frame delays off as we use them
         var appliedFrameDelayStack = frameDelays
          
-        try? LiveGifTool2.createDir(dirURL: gifDirURL)
-        let gifUrl = gifDirURL.appending(component: "\(Int(Date().timeIntervalSince1970)).gif")
+        try? LiveGifTool2.createDir(dirURL: config.gifTempDir)
+        let gifUrl = config.gifTempDir.appending(component: "\(Int(Date().timeIntervalSince1970)).gif")
+        
         guard let destination = CGImageDestinationCreateWithURL(gifUrl as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
             throw GifError.unableToCreateOutput
         }
         let orientation: UIImage.Orientation = LiveGifTool2.getUIImageOrientation(transform: videoTransform)
-        print("图片方向； \(orientation)")
-        var framesCompleted = 0
         var currentFrameIndex = 0
-        var uiImages: [UIImage] = []
+        
         var sample: CMSampleBuffer? = readerOutput.copyNextSampleBuffer()
-        let startTime = CFAbsoluteTimeGetCurrent()
+        var lastTime = CFAbsoluteTimeGetCurrent()
+        
         var cgImages: [CGImage] = []
         while sample != nil {
             currentFrameIndex += 1
@@ -103,42 +101,52 @@ extension URL {
             autoreleasepool {
                 if let newSample = sample {
                     var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
-                    
                     if var cgImage = cgImage  {
-                        var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: orientation)
-                        ui = ui.resize(width: maxResolution ?? 300)
-                        cgImages.append(ui.cgImage!)
+                        autoreleasepool {
+                            var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: orientation)
+                            ui = ui.resize(width: config.maxResolution ?? 300)
+                            cgImages.append(ui.cgImage!)
+                        }
                     }
                     cgImage = nil
                 }
                 sample = readerOutput.copyNextSampleBuffer()
             }
         }
-        let endTime = CFAbsoluteTimeGetCurrent()
-        print("获取帧耗时: \(endTime - startTime)")
+    
+        print("获取帧耗时: \(CFAbsoluteTimeGetCurrent() - lastTime)")
+        lastTime = CFAbsoluteTimeGetCurrent()
+        
         let fileProperties: [String: Any] = [kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]]
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
         
         /// 开始遍历
         let frameProperties: [String: Any] = [
-            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/gifFPS],
+            kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/config.gifFPS],
         ]
         
-        let newCGImages = try await self.removeBgColor(images: cgImages)
-        try Task.checkCancellation()
+        /// 移除图片背景
         let endTime2 = CFAbsoluteTimeGetCurrent()
-        print("去背景耗时: \(endTime2 - endTime)")
-        for cgImage in newCGImages {
-            var uiImage = UIImage(cgImage: cgImage)
-            if let watermark = watermark {
-                uiImage = uiImage.watermark(watermark: watermark)
-            }
-            uiImages.append(uiImage)
-            CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
+        if config.removeImageBgColor {
+            cgImages = try await LiveGifTool2.removeBgColor(images: cgImages)
+            try Task.checkCancellation()
+            print("去背景耗时: \(CFAbsoluteTimeGetCurrent() - lastTime)")
+            lastTime = CFAbsoluteTimeGetCurrent()
         }
-        try Task.checkCancellation()
-        let endTime3 = CFAbsoluteTimeGetCurrent()
-        print("合成GIF耗时: \(endTime3 - endTime2)")
+
+        var uiImages: [UIImage] = []
+        for cgImage in cgImages {
+            autoreleasepool {
+                var uiImage = UIImage(cgImage: cgImage)
+                if let watermark = config.watermark {
+                    uiImage = uiImage.watermark(watermark: watermark)
+                }
+                uiImages.append(uiImage)
+                CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
+            }
+        }
+        
+        print("合成GIF耗时: \(CFAbsoluteTimeGetCurrent() - lastTime)")
         let didCreateGIF = CGImageDestinationFinalize(destination)
         guard didCreateGIF else {
             throw GifError.unknown
@@ -234,31 +242,7 @@ extension URL {
         
         return frameDelays
     }
-    
-    /// 批量移除背景
-    public func removeBgColor(images: [CGImage]) async throws -> [CGImage] {
-        let tasks = images.map { image in
-            Task { () -> CGImage? in
-                return await image.removeBackground()
-            }
-        }
-        return try await withTaskCancellationHandler {
-            var newImages: [CGImage] = []
-            for try task in tasks {
-                if let value = await task.value {
-                    try Task.checkCancellation()
-                    newImages.append(value)
-                }
-            }
-            let rect = await newImages.commonBoundingBox()!
-            newImages = newImages.cropImages(toRect: rect)
-            return newImages
-        } onCancel: {
-            tasks.forEach { task in
-                task.cancel()
-            }
-        }
-    }
+  
 }
 
  
@@ -311,12 +295,12 @@ public extension UIImage {
 //        let size = self.size
 //        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
 //        let rect = CGRect(x: 0, y: 0, width: newSize.width, height: newSize.height)
-//        
+//
 //        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
 //        self.draw(in: rect)
 //        let newImage = UIGraphicsGetImageFromCurrentImageContext()
 //        UIGraphicsEndImageContext()
-//        
+//
 //        return newImage ?? self
 //    }
     
@@ -332,7 +316,7 @@ public extension UIImage {
 //        let widthRatio  = width  / size.width
 //        let heightRatio = height / size.height
 //        let scalingFactor = max(widthRatio, heightRatio)
-//        
+//
 //        return resize(scale: scalingFactor)
 //    }
 }

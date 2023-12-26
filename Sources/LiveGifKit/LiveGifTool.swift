@@ -32,21 +32,31 @@ public struct GifResult {
 ///maxResolution: 图片大小 默认300
 public struct GifToolParameter {
     var data: DataSource
-    var gifFPS: CGFloat = 30
-    var watermark: WatermarkConfig? = nil
-    var maxResolution: CGFloat? = 300 /// 图片大小
-    var mode = false
+    var gifFPS: CGFloat
+    var watermark: WatermarkConfig?
+    var maxResolution: CGFloat
+    var removeImageBgColor: Bool
     public enum DataSource {
         case livePhoto(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat = 30)
         case images(frames: [UIImage])
     }
-    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat? = 500, mode: Bool = false) {
+    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat = 500, removeImageBgColor: Bool = false) {
         self.gifFPS = gifFPS
         self.watermark = watermark
         self.data = data
         self.maxResolution = maxResolution
-        self.mode = mode
+        self.removeImageBgColor = removeImageBgColor
     }
+    
+    var livePhotoFPS: CGFloat {
+        switch self.data {
+        case .livePhoto(let livePhoto, let livePhotoFPS):
+            return livePhotoFPS
+        case .images(let frames):
+            return 30
+        }
+    }
+    var gifTempDir: URL!
 }
 
 protocol GifTool {
@@ -58,10 +68,14 @@ protocol GifTool {
 public class LiveGifTool: GifTool {
     var parameter: GifToolParameter!
     var gifTempDir: URL
-    
+    var gif: GifResult?
     public init() {
         self.gifTempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "Gif/" + UUID().uuidString)
+    }
+    
+    deinit {
+         print("LiveGifTool deinit")
     }
     
     /// 生成GIF
@@ -74,6 +88,7 @@ public class LiveGifTool: GifTool {
     public func createGif(parameter: GifToolParameter) async throws -> GifResult {
         let startTime = CFAbsoluteTimeGetCurrent()
         self.parameter = parameter
+        self.parameter.gifTempDir = self.gifTempDir
         switch parameter.data {
         case .livePhoto(let livePhoto, let livePhotoFPS):
             var result = try await self.createLivePhotoGif(livePhoto: livePhoto, livePhotoFPS: livePhotoFPS)
@@ -95,37 +110,23 @@ public class LiveGifTool: GifTool {
     ///livePhoto: PHLivePhoto
     ///PHLivePhoto: PHLivePhoto帧率
     private func createLivePhotoGif(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat) async throws -> GifResult {
-        if self.parameter.mode == true {
-            return try await self.secondMode(livePhoto: livePhoto)
-        }
         let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
         guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
         do {
-            let gif = try await videoUrl.convertToGIF(maxResolution: self.parameter.maxResolution, livePhotoFPS: livePhotoFPS, gifFPS: self.parameter.gifFPS, gifDirURL: self.gifTempDir, watermark: self.parameter.watermark)
-            return gif
+            self.gif = try await videoUrl.convertToGIF(config: self.parameter)
+            return self.gif!
         } catch {
             throw error
         }
-      
     }
     
-    public func secondMode(livePhoto: PHLivePhoto) async throws -> GifResult {
-        var config = StickerAttributes()
-        config.fps = self.parameter.gifFPS
-        config.animated = true
-        config.resizedWidth = self.parameter.maxResolution ?? 300
-        let converter = LivePhotoToFramesConverter(livePhoto: livePhoto, attributes: config)
-        let frames = try await converter.convert()
-        let gif = try await self.createImagesGif(images: frames)
-        return gif
-    }
     /// 通过图片合成GIF
     ///
     /// images: GIF帧数组
     private func createImagesGif(images: [UIImage]) async throws -> GifResult {
         do {
-            let gif = try images.createGif(gifFPS: self.parameter.gifFPS, gifDirURL: self.gifTempDir, watermark: self.parameter.watermark)
-            return gif
+            self.gif = try await images.createGif(config: self.parameter)
+            return self.gif!
         } catch {
             throw error
         }
@@ -139,6 +140,7 @@ public class LiveGifTool: GifTool {
         } catch {
             print("删除目录失败: \(self.gifTempDir) \(error)")
         }
+        self.gif = nil
     }
     
     /// 保存相册

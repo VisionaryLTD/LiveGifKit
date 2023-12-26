@@ -17,7 +17,7 @@ struct ContentView: View {
     
     /// 选择相册的flag
     @State var showPicker: Bool = false
-    @State var images = [UIImage]()
+    @State var images: [UIImage]?
     @State var gifUrl: URL?
     @State var fps: Double = 15
     @State var giffps: Double = 30
@@ -31,7 +31,7 @@ struct ContentView: View {
     @State var showWatermarkLocation = false
     @State var recommendImages = [UIImage]()
     @State var showRecommendUI = false
-    @State var mode = false
+    @State var removeBg = false
     var body: some View {
         VStack {
             HStack {
@@ -41,7 +41,7 @@ struct ContentView: View {
                         .font(.headline)
                         .offset(x: 0, y: -20))
                 Spacer()
-//                Toggle("切换", isOn: $mode)
+                Toggle("切换", isOn: $removeBg)
             }
           
             
@@ -73,7 +73,7 @@ struct ContentView: View {
                     .scaledToFit()
                     .frame(width: 500)
                 
-                Text("总帧数: \(self.images.count)")
+                Text("总帧数: \(self.images!.count)")
                 Text("总耗时: \(self.totalTime)")
             }
             HStack {
@@ -132,24 +132,30 @@ struct ContentView: View {
             
             Button {
                 Task {
+                    if self.gifTool == nil {
+                        self.gifTool = LiveGifTool()
+                    }
                     var waterConfig: WatermarkConfig? = nil
                     if self.watermarkText.count > 0 {
                         waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
                     }
-                    let parameter = GifToolParameter(data: .images(frames: self.images), gifFPS: self.giffps, watermark: waterConfig)
+                    let parameter = GifToolParameter(data: .images(frames: self.images!), gifFPS: self.giffps, watermark: waterConfig, removeImageBgColor: self.removeBg)
                     let gif = try? await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
+                    self.images = nil
+                    self.images = gif?.frames ?? []
                     self.totalTime = gif?.totalTime ?? 0
+                    
                     print("新的URL: \(String(describing: self.gifUrl))")
                 }
             } label: {
                 Text("重新生成")
             }.padding()
-            
-            if self.images.count > 0 {
+        
+            if let images = self.images, images.count > 0 {
                 ScrollView(.horizontal) {
                     HStack(spacing: 10, content: {
-                        ForEach(self.images, id: \.self) { image in
+                        ForEach(images, id: \.self) { image in
                             Image(uiImage: image)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
@@ -169,17 +175,19 @@ struct ContentView: View {
                 guard let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self)  else { return }
                 self.showPicker.toggle()
                 do {
+                    if self.gifTool == nil {
+                        self.gifTool = LiveGifTool()
+                    }
                     var waterConfig: WatermarkConfig? = nil
                     if self.watermarkText.count > 0 {
                         waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
                     }
                     
-                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, mode: self.mode)
-                     
+                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, removeImageBgColor: self.removeBg)
                     let gif = try await self.gifTool?.createGif(parameter: parameter)
-
                     self.gifUrl = gif?.url
                     self.photoItem = nil
+                    self.images = nil
                     self.images = gif?.frames ?? []
                     self.totalTime = gif?.totalTime ?? 0
                     print("首次URL: \(String(describing: self.gifUrl))")

@@ -10,7 +10,7 @@ import Vision
 import CoreImage.CIFilterBuiltins
 
 extension CGImage {
-    func removeBackground(_ isTrue: Bool = true) async -> CGImage? {
+    func removeBackground(_ isTrue: Bool = true) async -> CGImage {
         if !isTrue {
             return self
         }
@@ -19,7 +19,7 @@ extension CGImage {
         }.value
     }
     
-    private func removeBackgroundImpl() -> CGImage? {
+    private func removeBackgroundImpl() -> CGImage {
         let ciImage = CIImage(cgImage: self)
         guard let mask = subjectMask(ciImage: ciImage) else {
             return self
@@ -109,33 +109,5 @@ extension CGImage {
 extension Array where Element == CGImage {
     func cropImages(toRect rect: CGRect) -> [CGImage] {
         compactMap { $0.cropImage(toRect: rect) }
-    }
-    
-    func commonBoundingBox() async -> CGRect? {
-        await withTaskGroup(of: CGRect?.self) { group in
-            for image in self {
-                group.addTask {
-                    await Task.detached {
-                        image.nonTransparentBoundingBox()
-                    }.value
-                }
-            }
-            
-            var commonBox: CGRect?
-            
-            for await rect in group {
-                guard let rect else {
-                    continue
-                }
-                
-                if let existingBox = commonBox {
-                    commonBox = existingBox.union(rect)
-                } else {
-                    commonBox = rect
-                }
-            }
-            
-            return commonBox
-        }
     }
 }

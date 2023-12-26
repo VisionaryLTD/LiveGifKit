@@ -84,4 +84,40 @@ struct LiveGifTool2 {
             return .up
         }
     }
+    
+    
+    /// 批量移除背景
+    public static func removeBgColor(images: [CGImage]) async throws -> [CGImage] {
+        let tasks = images.map { image in
+            Task { () -> (CGImage, CGRect?) in
+                let cgImg = await image.removeBackground()
+                let rect = await cgImg.nonTransparentBoundingBox()
+                return (cgImg, rect)
+            }
+        }
+        return try await withTaskCancellationHandler {
+            var newImages: [CGImage] = []
+            var finalRect: CGRect?
+            for try task in tasks {
+                try Task.checkCancellation()
+                
+                let (cgImg, rect) = await task.value
+                if let rect = rect {
+                    /// 计算最小矩形 如果矩形为空 说明是透明图片 舍弃掉
+                    if let existingBox = finalRect {
+                        finalRect = existingBox.union(rect)
+                    } else {
+                        finalRect = rect
+                    }
+                    newImages.append(cgImg)
+                }
+            }
+            newImages = newImages.cropImages(toRect: finalRect!)
+            return newImages
+        } onCancel: {
+            tasks.forEach { task in
+                task.cancel()
+            }
+        }
+    }
 }
