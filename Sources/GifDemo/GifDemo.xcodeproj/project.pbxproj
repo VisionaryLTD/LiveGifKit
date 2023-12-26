@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		8A4155AD2B25D525002C5653 /* LiveGifKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8A4155AC2B25D525002C5653 /* LiveGifKit */; };
+		8A6B60A72B3B282800F8C0AF /* SDWebImageSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 8A6B60A62B3B282800F8C0AF /* SDWebImageSwiftUI */; };
 		8AE6228C2B2579E0004215B5 /* GifDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AE6228B2B2579E0004215B5 /* GifDemoApp.swift */; };
 		8AE6228E2B2579E0004215B5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AE6228D2B2579E0004215B5 /* ContentView.swift */; };
 		8AE622902B2579E1004215B5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AE6228F2B2579E1004215B5 /* Assets.xcassets */; };
@@ -30,6 +31,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8A6B60A72B3B282800F8C0AF /* SDWebImageSwiftUI in Frameworks */,
 				8A4155AD2B25D525002C5653 /* LiveGifKit in Frameworks */,
 				8AE622A82B258E13004215B5 /* Kingfisher in Frameworks */,
 			);
@@ -101,6 +103,7 @@
 			packageProductDependencies = (
 				8AE622A72B258E13004215B5 /* Kingfisher */,
 				8A4155AC2B25D525002C5653 /* LiveGifKit */,
+				8A6B60A62B3B282800F8C0AF /* SDWebImageSwiftUI */,
 			);
 			productName = GifDemo;
 			productReference = 8AE622882B2579E0004215B5 /* GifDemo.app */;
@@ -133,6 +136,7 @@
 			packageReferences = (
 				8AE622A62B258E13004215B5 /* XCRemoteSwiftPackageReference "Kingfisher" */,
 				8A4155AB2B25D525002C5653 /* XCLocalSwiftPackageReference "../.." */,
+				8A6B60A52B3B282800F8C0AF /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */,
 			);
 			productRefGroup = 8AE622892B2579E0004215B5 /* Products */;
 			projectDirPath = "";
@@ -381,6 +385,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		8A6B60A52B3B282800F8C0AF /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/SDWebImage/SDWebImageSwiftUI.git";
+			requirement = {
+				branch = 2.x;
+				kind = branch;
+			};
+		};
 		8AE622A62B258E13004215B5 /* XCRemoteSwiftPackageReference "Kingfisher" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/onevcat/Kingfisher.git";
@@ -395,6 +407,11 @@
 		8A4155AC2B25D525002C5653 /* LiveGifKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LiveGifKit;
+		};
+		8A6B60A62B3B282800F8C0AF /* SDWebImageSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8A6B60A52B3B282800F8C0AF /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */;
+			productName = SDWebImageSwiftUI;
 		};
 		8AE622A72B258E13004215B5 /* Kingfisher */ = {
 			isa = XCSwiftPackageProductDependency;

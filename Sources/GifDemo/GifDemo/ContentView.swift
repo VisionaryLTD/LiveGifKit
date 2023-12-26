@@ -10,6 +10,7 @@ import PhotosUI
 import LiveGifKit
 import Kingfisher
 import Photos
+import SDWebImageSwiftUI
 
 struct ContentView: View {
     /// 相册Item
@@ -17,7 +18,8 @@ struct ContentView: View {
     
     /// 选择相册的flag
     @State var showPicker: Bool = false
-    @State var images: [UIImage]?
+    @State var images: [UIImage]? = []
+    @State var gifData: Data?
     @State var gifUrl: URL?
     @State var fps: Double = 15
     @State var giffps: Double = 30
@@ -32,6 +34,7 @@ struct ContentView: View {
     @State var recommendImages = [UIImage]()
     @State var showRecommendUI = false
     @State var removeBg = false
+    @State var task: Task<(), Never>!
     var body: some View {
         VStack {
             HStack {
@@ -68,14 +71,15 @@ struct ContentView: View {
             }
                         
             Spacer()
-            if gifUrl?.absoluteString.count ?? 0 > 0 {
-                KFAnimatedImage(gifUrl)
+            if let data = self.gifData {
+                AnimatedImage(data: data)
+                    .purgeable(true)
+                    .resizable()
                     .scaledToFit()
-                    .frame(width: 500)
-                
                 Text("总帧数: \(self.images!.count)")
                 Text("总耗时: \(self.totalTime)")
             }
+            
             HStack {
                 Button {
                     self.showPicker.toggle()
@@ -142,7 +146,7 @@ struct ContentView: View {
                     let parameter = GifToolParameter(data: .images(frames: self.images!), gifFPS: self.giffps, watermark: waterConfig, removeImageBgColor: self.removeBg)
                     let gif = try? await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
-                    self.images = nil
+                    self.gifData = gif?.data
                     self.images = gif?.frames ?? []
                     self.totalTime = gif?.totalTime ?? 0
                     
@@ -170,7 +174,10 @@ struct ContentView: View {
             PhotoPickerView(pickedItem: $photoItem)
         })
         .onChange(of: self.photoItem) {
-            Task {
+            if self.task != nil && !self.task.isCancelled {
+                self.task.cancel()
+            }
+            self.task = Task {
                 guard let photoItem = self.photoItem else { return }
                 guard let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self)  else { return }
                 self.showPicker.toggle()
@@ -186,9 +193,9 @@ struct ContentView: View {
                     let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, removeImageBgColor: self.removeBg)
                     let gif = try await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
+                    self.gifData = gif?.data
                     self.photoItem = nil
-                    self.images = nil
-                    self.images = gif?.frames ?? []
+//                    self.images = gif?.frames ?? []
                     self.totalTime = gif?.totalTime ?? 0
                     print("首次URL: \(String(describing: self.gifUrl))")
                 } catch {

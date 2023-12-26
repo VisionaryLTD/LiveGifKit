@@ -91,7 +91,7 @@ struct LiveGifTool2 {
         let tasks = images.map { image in
             Task { () -> (CGImage, CGRect?) in
                 let cgImg = await image.removeBackground()
-                let rect = await cgImg.nonTransparentBoundingBox()
+                let rect = cgImg.nonTransparentBoundingBox()
                 return (cgImg, rect)
             }
         }

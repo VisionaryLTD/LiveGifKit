@@ -104,7 +104,7 @@ extension URL {
                     if var cgImage = cgImage  {
                         autoreleasepool {
                             var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: orientation)
-                            ui = ui.resize(width: config.maxResolution ?? 300)
+                            ui = ui.resize(width: config.maxResolution )
                             cgImages.append(ui.cgImage!)
                         }
                     }
