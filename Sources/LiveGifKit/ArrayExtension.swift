@@ -40,7 +40,7 @@ extension Array where Element == UIImage {
         ]
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
         var cgImages = self.map({ $0.cgImage! })
-        if config.removeImageBgColor {
+        if config.removeBg {
             cgImages = try await LiveGifTool2.removeBgColor(images: cgImages)
             try Task.checkCancellation()
         }

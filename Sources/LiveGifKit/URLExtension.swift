@@ -128,7 +128,7 @@ extension URL {
         
         /// 移除图片背景
         let endTime2 = CFAbsoluteTimeGetCurrent()
-        if config.removeImageBgColor {
+        if config.removeBg {
             cgImages = try await LiveGifTool2.removeBgColor(images: cgImages)
             try Task.checkCancellation()
             print("去背景耗时: \(CFAbsoluteTimeGetCurrent() - lastTime)")

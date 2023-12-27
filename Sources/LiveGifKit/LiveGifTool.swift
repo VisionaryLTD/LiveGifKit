@@ -35,22 +35,23 @@ public struct GifResult {
 ///watermarkInfo: 水印信息 默认为空
 ///data: DataSource、livePhoto和图片两种方式
 ///maxResolution: 图片大小 默认300
+///removeImageBgColor: 是否去背景
 public struct GifToolParameter {
     var data: DataSource
     var gifFPS: CGFloat
     var watermark: WatermarkConfig?
     var maxResolution: CGFloat
-    var removeImageBgColor: Bool
+    var removeBg: Bool
     public enum DataSource {
         case livePhoto(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat = 30)
         case images(frames: [UIImage])
     }
-    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat = 500, removeImageBgColor: Bool = false) {
+    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat = 500, removeBg: Bool = false) {
         self.gifFPS = gifFPS
         self.watermark = watermark
         self.data = data
         self.maxResolution = maxResolution
-        self.removeImageBgColor = removeImageBgColor
+        self.removeBg = removeBg
     }
     
     var livePhotoFPS: CGFloat {

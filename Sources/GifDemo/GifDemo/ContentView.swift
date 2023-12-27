@@ -143,7 +143,7 @@ struct ContentView: View {
                     if self.watermarkText.count > 0 {
                         waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
                     }
-                    let parameter = GifToolParameter(data: .images(frames: self.images!), gifFPS: self.giffps, watermark: waterConfig, removeImageBgColor: self.removeBg)
+                    let parameter = GifToolParameter(data: .images(frames: self.images!), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg)
                     let gif = try? await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
                     self.gifData = gif?.data
@@ -190,7 +190,7 @@ struct ContentView: View {
                         waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
                     }
                     
-                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, removeImageBgColor: self.removeBg)
+                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg)
                     let gif = try await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
                     self.gifData = gif?.data
