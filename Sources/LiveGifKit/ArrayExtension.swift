@@ -41,7 +41,7 @@ extension Array where Element == UIImage {
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
         var cgImages = self.map({ $0.cgImage! })
         if config.removeBg {
-            cgImages = try await LiveGifTool2.removeBgColor(images: cgImages)
+            cgImages = try await LiveGifTool2.removeBg(images: cgImages)
             try Task.checkCancellation()
         }
         
@@ -68,15 +68,6 @@ extension Array where Element == UIImage {
  
 public extension UIImage {
     func resize(scale: CGFloat = 0.5) -> UIImage {
-//        let image = UIImage(named: "myImage")
-//        let scaledImage = UIImage(cgImage: image!.cgImage!, scale: 2.0, orientation: .up)
-//        let resizedImage = scaledImage.resized(to: CGSize(width: 50, height: 50))
-        
-//        let size = self.size
-//        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
-//        return UIGraphicsImageRenderer(size: newSize).image { _ in
-//            self.draw(in: CGRect(origin: .zero, size: newSize))
-//        }
         let size = self.size
         let newSize = CGSize(width: size.width * scale, height: size.height * scale)
         let rect = CGRect(x: 0, y: 0, width: newSize.width, height: newSize.height)
@@ -85,17 +76,13 @@ public extension UIImage {
         self.draw(in: rect)
         let newImage = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
-        
         return newImage ?? self
     }
      
-   
-    
     func resize(width: CGFloat = 1, height: CGFloat = 1) -> UIImage {
         let widthRatio  = width  / size.width
         let heightRatio = height / size.height
         let scalingFactor = max(widthRatio, heightRatio)
-        
         return resize(scale: scalingFactor)
     }
 }

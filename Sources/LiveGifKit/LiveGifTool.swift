@@ -68,10 +68,22 @@ public struct GifToolParameter {
 protocol GifTool {
     func save(method: Method) async throws
     func createGif(parameter: GifToolParameter) async throws -> GifResult
+    func removeBackground(uiImage: UIImage) async throws -> Data?
     func cleanup()
 }
 
 public class LiveGifTool: GifTool {
+    
+    /// 去图片背景和空白部分
+    public func removeBackground(uiImage: UIImage) async throws -> Data? {
+        if let cgImage = uiImage.cgImage,
+           let cgImage2 = try await LiveGifTool2.removeBg(images: [cgImage]).first {
+            let image = UIImage(cgImage: cgImage2, scale: 1.0, orientation: uiImage.imageOrientation)
+            return image.pngData()
+        }
+        return nil
+    }
+    
     var parameter: GifToolParameter!
     var gifTempDir: URL
     public init() {

@@ -12,7 +12,7 @@ struct PhotoPickerView: View {
     @Binding var pickedItem: PhotosPickerItem?
     
     var body: some View {
-        PhotosPicker("", selection: $pickedItem, matching: .livePhotos)
+        PhotosPicker("", selection: $pickedItem, matching: .images)
             .photosPickerStyle(.inline)
             .photosPickerDisabledCapabilities(.selectionActions)
             .ignoresSafeArea(edges: .top)

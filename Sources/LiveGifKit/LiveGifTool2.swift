@@ -87,11 +87,12 @@ struct LiveGifTool2 {
     
     
     /// 批量移除背景
-    public static func removeBgColor(images: [CGImage]) async throws -> [CGImage] {
+    public static func removeBg(images: [CGImage]) async throws -> [CGImage] {
         let tasks = images.map { image in
             Task { () -> (CGImage, CGRect?) in
                 let cgImg = await image.removeBackground()
                 let rect = cgImg.nonTransparentBoundingBox()
+                print("矩形：\(rect)")
                 return (cgImg, rect)
             }
         }
