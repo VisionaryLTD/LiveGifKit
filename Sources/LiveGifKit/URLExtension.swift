@@ -23,8 +23,9 @@ extension URL {
             throw GifError.unableToFindTrack
         }
         
-        var videoSize = try await videoTrack.load(.naturalSize).applying(videoTrack.load(.preferredTransform))
         let videoTransform = try await videoTrack.load(.preferredTransform)
+        var videoSize = try await videoTrack.load(.naturalSize).applying(videoTransform)
+         
         let videoWidth = abs(videoSize.width * videoTransform.a) + abs(videoSize.height * videoTransform.c)
         let videoHeight = abs(videoSize.width * videoTransform.b) + abs(videoSize.height * videoTransform.d)
         let videoFrame = CGRect(x: 0, y: 0, width: videoWidth, height: videoHeight)
@@ -239,85 +240,6 @@ extension URL {
                 frameDelays[slowFrame - 1] = flooredHundredth
             }
         }
-        
         return frameDelays
     }
-  
 }
-
- 
-    
-
-extension UIImage {
-   /**
-    *  重设图片大小
-    */
-   func reSizeImage(reSize:CGSize)->UIImage {
-       //UIGraphicsBeginImageContext(reSize);
-       UIGraphicsBeginImageContextWithOptions(reSize,false, UIScreen.main.scale);
-       self.draw(in: CGRectMake(0, 0, reSize.width, reSize.height));
-       let reSizeImage :UIImage? = UIGraphicsGetImageFromCurrentImageContext();
-       UIGraphicsEndImageContext();
-       guard let reSizeImage = reSizeImage else { return self }
-       return reSizeImage;
-       
-   }
-    
-   /**
-    *  等比率缩放
-    */
-   func scaleImage(scaleSize:CGFloat)->UIImage {
-       let reSize = CGSizeMake(self.size.width * scaleSize, self.size.height * scaleSize)
-       return reSizeImage(reSize: reSize)
-   }
-}
-
-extension CGImage {
-    func resizeCGImage(_ image: CGImage, targetSize: CGSize) -> CGImage {
-        let width = Int(targetSize.width)
-        let height = Int(targetSize.height)
-        let bitsPerComponent = image.bitsPerComponent
-        let bytesPerRow = 0
-        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = image.bitmapInfo.rawValue
-        let context = CGContext(data: nil, width: width, height: height,
-                                bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow,
-                                space: colorSpace, bitmapInfo: bitmapInfo)
-        
-        let rect = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
-        context?.draw(image, in: rect)
-        let resizedImage = context?.makeImage()
-        return resizedImage ?? self
-    }
-}
-public extension UIImage {
-//    func resize(scale: CGFloat = 0.5) -> UIImage {
-//        let size = self.size
-//        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
-//        let rect = CGRect(x: 0, y: 0, width: newSize.width, height: newSize.height)
-//
-//        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
-//        self.draw(in: rect)
-//        let newImage = UIGraphicsGetImageFromCurrentImageContext()
-//        UIGraphicsEndImageContext()
-//
-//        return newImage ?? self
-//    }
-    
-    func resize(targetSize: CGSize) -> UIImage {
-        let widthRatio  = targetSize.width  / size.width
-        let heightRatio = targetSize.height / size.height
-        let scalingFactor = max(widthRatio, heightRatio)
-        
-        return resize(scale: scalingFactor)
-    }
-    
-//    func resize(width: CGFloat = 1, height: CGFloat = 1) -> UIImage {
-//        let widthRatio  = width  / size.width
-//        let heightRatio = height / size.height
-//        let scalingFactor = max(widthRatio, heightRatio)
-//
-//        return resize(scale: scalingFactor)
-//    }
-}
- 

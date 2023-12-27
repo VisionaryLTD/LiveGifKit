@@ -15,8 +15,13 @@ import _PhotosUI_SwiftUI
 public struct GifResult {
     public let url: URL
     public let frames: [UIImage]
-    public var data: Data {
-        try! Data(contentsOf: url)
+    public var data: Data? {
+        do {
+            return try Data(contentsOf: url)
+        } catch {
+            print("URL错误....")
+            return nil
+        }
     }
     
 #if DEBUG
@@ -50,9 +55,9 @@ public struct GifToolParameter {
     
     var livePhotoFPS: CGFloat {
         switch self.data {
-        case .livePhoto(let livePhoto, let livePhotoFPS):
+        case .livePhoto(_, let livePhotoFPS):
             return livePhotoFPS
-        case .images(let frames):
+        case .images(_):
             return 30
         }
     }
@@ -68,7 +73,6 @@ protocol GifTool {
 public class LiveGifTool: GifTool {
     var parameter: GifToolParameter!
     var gifTempDir: URL
-    var gif: GifResult?
     public init() {
         self.gifTempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "Gif/" + UUID().uuidString)
@@ -113,8 +117,7 @@ public class LiveGifTool: GifTool {
         let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
         guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
         do {
-            self.gif = try await videoUrl.convertToGIF(config: self.parameter)
-            return self.gif!
+            return try await videoUrl.convertToGIF(config: self.parameter)
         } catch {
             throw error
         }
@@ -125,8 +128,7 @@ public class LiveGifTool: GifTool {
     /// images: GIF帧数组
     private func createImagesGif(images: [UIImage]) async throws -> GifResult {
         do {
-            self.gif = try await images.createGif(config: self.parameter)
-            return self.gif!
+            return try await images.createGif(config: self.parameter)
         } catch {
             throw error
         }
@@ -136,11 +138,14 @@ public class LiveGifTool: GifTool {
     public func cleanup() {
         do {
             print("删除目录: \(self.gifTempDir.path())")
-            try FileManager.default.removeItem(atPath: self.gifTempDir.path())
+            if FileManager.default.fileExists(atPath: self.gifTempDir.path) {
+                try FileManager.default.removeItem(atPath: self.gifTempDir.path())
+            } else {
+                print("目录已被删除")
+            }
         } catch {
             print("删除目录失败: \(self.gifTempDir) \(error)")
         }
-        self.gif = nil
     }
     
     /// 保存相册

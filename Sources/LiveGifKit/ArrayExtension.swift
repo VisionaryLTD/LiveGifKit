@@ -12,8 +12,17 @@ import UniformTypeIdentifiers
 import CoreText
 import UIKit
 
+extension Array where Element == CGImage {
+    func cropImages(toRect rect: CGRect) -> [CGImage] {
+        compactMap { $0.cropImage(toRect: rect) }
+    }
+}
+
 extension Array where Element == UIImage {
     public func createGif(config: GifToolParameter) async throws -> GifResult {
+        if self.isEmpty {
+            throw GifError.gifResultNil
+        }
         try? LiveGifTool2.createDir(dirURL: config.gifTempDir)
         let gifFileName = "\(Int(Date().timeIntervalSince1970)).gif"
         let gifURL = config.gifTempDir.appending(path: gifFileName)

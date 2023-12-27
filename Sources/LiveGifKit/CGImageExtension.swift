@@ -103,11 +103,4 @@ extension CGImage {
         guard let cgImage = self.cropping(to: rect) else { return nil }
         return cgImage
     }
-
-}
-
-extension Array where Element == CGImage {
-    func cropImages(toRect rect: CGRect) -> [CGImage] {
-        compactMap { $0.cropImage(toRect: rect) }
-    }
 }
