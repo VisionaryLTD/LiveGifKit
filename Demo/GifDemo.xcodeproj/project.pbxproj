@@ -14,6 +14,7 @@
 		8AE622902B2579E1004215B5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AE6228F2B2579E1004215B5 /* Assets.xcassets */; };
 		8AE622932B2579E1004215B5 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AE622922B2579E1004215B5 /* Preview Assets.xcassets */; };
 		8AE622A52B257BEC004215B5 /* PhotoPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AE622A42B257BEC004215B5 /* PhotoPickerView.swift */; };
+		8AF1F6932B3DBD2F00D74BED /* LiveGifKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF1F6922B3DBD2F00D74BED /* LiveGifKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 			files = (
 				8A6B60A72B3B282800F8C0AF /* SDWebImageSwiftUI in Frameworks */,
 				8A4155AD2B25D525002C5653 /* LiveGifKit in Frameworks */,
+				8AF1F6932B3DBD2F00D74BED /* LiveGifKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -101,6 +103,7 @@
 			packageProductDependencies = (
 				8A4155AC2B25D525002C5653 /* LiveGifKit */,
 				8A6B60A62B3B282800F8C0AF /* SDWebImageSwiftUI */,
+				8AF1F6922B3DBD2F00D74BED /* LiveGifKit */,
 			);
 			productName = GifDemo;
 			productReference = 8AE622882B2579E0004215B5 /* GifDemo.app */;
@@ -131,8 +134,8 @@
 			);
 			mainGroup = 8AE6227F2B2579E0004215B5;
 			packageReferences = (
-				8A4155AB2B25D525002C5653 /* XCLocalSwiftPackageReference "../.." */,
 				8A6B60A52B3B282800F8C0AF /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */,
+				8AF1F6912B3DBD2F00D74BED /* XCLocalSwiftPackageReference ".." */,
 			);
 			productRefGroup = 8AE622892B2579E0004215B5 /* Products */;
 			projectDirPath = "";
@@ -374,9 +377,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		8A4155AB2B25D525002C5653 /* XCLocalSwiftPackageReference "../.." */ = {
+		8AF1F6912B3DBD2F00D74BED /* XCLocalSwiftPackageReference ".." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../..;
+			relativePath = ..;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -400,6 +403,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 8A6B60A52B3B282800F8C0AF /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */;
 			productName = SDWebImageSwiftUI;
+		};
+		8AF1F6922B3DBD2F00D74BED /* LiveGifKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveGifKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

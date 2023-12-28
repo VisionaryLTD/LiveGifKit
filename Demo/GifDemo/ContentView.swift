@@ -8,7 +8,6 @@
 import SwiftUI
 import PhotosUI
 import LiveGifKit
-import Kingfisher
 import Photos
 import SDWebImageSwiftUI
 
