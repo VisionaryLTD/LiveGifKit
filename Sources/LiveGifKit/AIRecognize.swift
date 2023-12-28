@@ -33,24 +33,3 @@ extension VNDetectFaceRectanglesRequest: ResultChecking {
     }
 }
 
-public extension UIImage {
-    
-    func recognition() -> Bool {
-        guard let cgImage = self.cgImage else { return false }
-        let requests = [
-            VNRecognizeAnimalsRequest(),
-            VNDetectFaceRectanglesRequest()
-        ]
-        let requestHandler = VNImageRequestHandler(cgImage: cgImage)
-        do {
-            try requestHandler.perform(requests)
-        } catch {
-            print("识别请求错误 \(error)")
-        }
-        let results = requests.map({ $0 as! ResultChecking })
-        if let request = results.first(where: { $0.isValid() }) {
-            return true
-        }
-        return false
-    }
-}

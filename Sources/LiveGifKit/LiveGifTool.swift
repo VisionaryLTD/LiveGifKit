@@ -42,16 +42,18 @@ public struct GifToolParameter {
     var watermark: WatermarkConfig?
     var maxResolution: CGFloat
     var removeBg: Bool
+    var imageOrientation: UIImage.Orientation
     public enum DataSource {
         case livePhoto(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat = 30)
         case images(frames: [UIImage])
     }
-    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat = 500, removeBg: Bool = false) {
+    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat = 500, removeBg: Bool = false, imageOrientation: UIImage.Orientation = .up) {
         self.gifFPS = gifFPS
         self.watermark = watermark
         self.data = data
         self.maxResolution = maxResolution
         self.removeBg = removeBg
+        self.imageOrientation = imageOrientation
     }
     
     var livePhotoFPS: CGFloat {

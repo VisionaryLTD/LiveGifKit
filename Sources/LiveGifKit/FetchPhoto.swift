@@ -10,7 +10,6 @@ import Photos
 import UIKit
 
 public struct FetchPhoto {
-    
     public static func fetch(days: Int = 30) -> [UIImage] {
         var images: [UIImage] = []
         // 获取最近三十天的照片

@@ -83,7 +83,6 @@ extension URL {
         guard let destination = CGImageDestinationCreateWithURL(gifUrl as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
             throw GifError.unableToCreateOutput
         }
-        let orientation: UIImage.Orientation = LiveGifTool2.getUIImageOrientation(transform: videoTransform)
         var currentFrameIndex = 0
         
         var sample: CMSampleBuffer? = readerOutput.copyNextSampleBuffer()
@@ -104,7 +103,7 @@ extension URL {
                     var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
                     if var cgImage = cgImage  {
                         autoreleasepool {
-                            var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: orientation)
+                            var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: config.imageOrientation)
                             ui = ui.resize(width: config.maxResolution )
                             cgImages.append(ui.cgImage!)
                         }

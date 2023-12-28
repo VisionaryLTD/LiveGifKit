@@ -42,37 +42,9 @@ struct LiveGifTool2 {
         }
     }
     
-    static func getUIImageOrientation(transform: CGAffineTransform) -> UIImage.Orientation {
-        if transform.a == 0 && transform.b == 1.0 && transform.c == -1.0 && transform.d == 0 {
-            return .right
-        } else if transform.a == 0 && transform.b == -1.0 && transform.c == 1.0 && transform.d == 0 {
-            return .left
-        } else if transform.a == 1.0 && transform.b == 0 && transform.c == 0 && transform.d == 1.0 {
-            return .up
-        } else if transform.a == -1.0 && transform.b == 0 && transform.c == 0 && transform.d == -1.0 {
-            return .down
-        } else if transform.a == 1.0 && transform.b == 0 && transform.c == 0 && transform.d == -1.0 {
-            return .down
-        }  else {
-            return .up
-        }
-    }
-    
     static func getCGImageOrientation(imageOrientation: UIImage.Orientation) -> CGImagePropertyOrientation {
-        switch imageOrientation {
-        case .up:
-            return .up
-        case .down:
-            return .down
-        case .left:
-            return .left
-        case .right:
-            return .right
-        default:
-            return .up
-        }
+        return CGImagePropertyOrientation(rawValue: UInt32(imageOrientation.rawValue)) ?? .up
     }
-    
     
     /// 批量移除背景
     public static func removeBg(images: [CGImage]) async throws -> [CGImage] {
@@ -88,7 +60,6 @@ struct LiveGifTool2 {
             var finalRect: CGRect?
             for try task in tasks {
                 try Task.checkCancellation()
-                
                 let (cgImg, rect) = await task.value
                 if let rect = rect {
                     /// 计算最小矩形 如果矩形为空 说明是透明图片 舍弃掉

@@ -143,7 +143,7 @@ struct ContentView: View {
                     if self.watermarkText.count > 0 {
                         waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
                     }
-                    let parameter = GifToolParameter(data: .images(frames: self.images!), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg)
+                    let parameter = GifToolParameter(data: .images(frames: self.images!), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg, imageOrientation: .right)
                     let gif = try? await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
                     self.gifData = gif?.data
@@ -182,26 +182,30 @@ struct ContentView: View {
                 guard let photoItem = self.photoItem else { return }
                 self.showPicker.toggle()
                 /// 静态图片
-                if let data = try? await photoItem.loadTransferable(type: Data.self),
-                   let img = UIImage(data: data),
-                   let imgData = try? await self.gifTool?.removeBackground(uiImage: img),
-                   let img2 = UIImage(data: imgData)
-                {
-                    
-                    print("有静态图片")
-                    await MainActor.run() {
-                        self.images?.removeAll()
-                        self.images?.append(img2)
-                        self.photoItem = nil
-                        print("哈哈哈: \(self.images?.count)")
-                    }
-                    
-                }
- 
-               
-                return
+//                if let data = try? await photoItem.loadTransferable(type: Data.self),
+//                   let img = UIImage(data: data),
+//                   let imgData = try? await self.gifTool?.removeBackground(uiImage: img),
+//                   let img2 = UIImage(data: imgData)
+//                {
+//                    
+//                    print("有静态图片")
+//                    await MainActor.run() {
+//                        self.images?.removeAll()
+//                        self.images?.append(img2)
+//                        self.photoItem = nil
+//                        print("哈哈哈: \(self.images?.count)")
+//                    }
+//                    
+//                }
+// 
+//               
+//                return
                 
-                guard let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self)  else {
+                guard let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self),
+                      let photoData = try? await photoItem.loadTransferable(type: Data.self),
+                      let img = UIImage(data: photoData)
+                      
+                else {
                     return
                 }
                 
@@ -213,13 +217,13 @@ struct ContentView: View {
                     if self.watermarkText.count > 0 {
                         waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
                     }
-                    
-                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg)
+                    let imageOrientation = img.imageOrientation
+                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg, imageOrientation: imageOrientation)
                     let gif = try await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
                     self.gifData = gif?.data
                     self.photoItem = nil
-//                    self.images = gif?.frames ?? []
+                    self.images = gif?.frames ?? []
                     self.totalTime = gif?.totalTime ?? 0
                     print("首次URL: \(String(describing: self.gifUrl))")
                 } catch {
