@@ -46,6 +46,36 @@ struct LiveGifTool2 {
         return CGImagePropertyOrientation(rawValue: UInt32(imageOrientation.rawValue)) ?? .up
     }
     
+    static func getUIImageOrientation(transform: CGAffineTransform) -> UIImage.Orientation {
+        if transform.a == 0 && transform.b == 1.0 && transform.c == -1.0 && transform.d == 0 {
+            return .right
+        }  else if transform.a == 0 && transform.b == -1.0 && transform.c == -1.0 && transform.d == 0 {
+            return .rightMirrored
+        }
+        
+        else if transform.a == 0 && transform.b == -1.0 && transform.c == 1.0 && transform.d == 0 {
+            return .left
+        }  else if transform.a == 0 && transform.b == 1.0 && transform.c == 1.0 && transform.d == 0 {
+            return .leftMirrored
+        }
+        
+        else if transform.a == 1.0 && transform.b == 0 && transform.c == 0 && transform.d == 1.0 {
+            return .up
+        } else if transform.a == -1.0 && transform.b == 0 && transform.c == 0 && transform.d == 1.0 {
+            return .upMirrored
+        }
+        
+        else if transform.a == -1.0 && transform.b == 0 && transform.c == 0 && transform.d == -1.0 {
+            return .down
+        } else if transform.a == 1.0 && transform.b == 0 && transform.c == 0 && transform.d == -1.0 {
+            return .downMirrored
+        }
+        
+        else {
+            return .up
+        }
+    }
+    
     /// 批量移除背景
     public static func removeBg(images: [CGImage]) async throws -> [CGImage] {
         let tasks = images.map { image in

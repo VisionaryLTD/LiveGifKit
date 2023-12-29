@@ -142,7 +142,7 @@ struct ContentView: View {
                     if self.watermarkText.count > 0 {
                         waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
                     }
-                    let parameter = GifToolParameter(data: .images(frames: self.images!), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg, imageOrientation: .right)
+                    let parameter = GifToolParameter(data: .images(frames: self.images!), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg)
                     let gif = try? await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
                     self.gifData = gif?.data
@@ -200,13 +200,7 @@ struct ContentView: View {
 //               
 //                return
                 
-                guard let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self),
-                      let photoData = try? await photoItem.loadTransferable(type: Data.self),
-                      let img = UIImage(data: photoData)
-                      
-                else {
-                    return
-                }
+                guard let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self)else {  return }
                 
                 do {
                     if self.gifTool == nil {
@@ -216,8 +210,7 @@ struct ContentView: View {
                     if self.watermarkText.count > 0 {
                         waterConfig = WatermarkConfig(text: self.watermarkText, textColor: UIColor(self.selectedColor), location: self.watermarkLocation)
                     }
-                    let imageOrientation = img.imageOrientation
-                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg, imageOrientation: imageOrientation)
+                    let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: waterConfig, removeBg: self.removeBg)
                     let gif = try await self.gifTool?.createGif(parameter: parameter)
                     self.gifUrl = gif?.url
                     self.gifData = gif?.data

@@ -84,7 +84,7 @@ extension URL {
             throw GifError.unableToCreateOutput
         }
         var currentFrameIndex = 0
-        
+        let imageOrientation = LiveGifTool2.getUIImageOrientation(transform: videoTransform)
         var sample: CMSampleBuffer? = readerOutput.copyNextSampleBuffer()
         var lastTime = CFAbsoluteTimeGetCurrent()
         
@@ -103,7 +103,7 @@ extension URL {
                     var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
                     if var cgImage = cgImage  {
                         autoreleasepool {
-                            var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: config.imageOrientation)
+                            var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: imageOrientation)
                             ui = ui.resize(width: config.maxResolution )
                             cgImages.append(ui.cgImage!)
                         }
