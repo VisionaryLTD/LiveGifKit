@@ -1,20 +1,21 @@
 //
-//  URLExtension.swift
+//  File.swift
+//  
 //
+//  Created by 汤小军 on 2023/12/31.
 //
-//  Created by tangxiaojun on 2023/12/11.
-//
-import UIKit
+
 import Foundation
 import AVFoundation
 import Foundation
 import UniformTypeIdentifiers
 import CoreText
+import UIKit
 
-extension URL {
+struct VideoGifHander {
     /// 创建GIF
-    func convertToGIF(config: GifToolParameter) async throws -> GifResult {
-        let asset = AVURLAsset(url: self)
+    static func convertToGIF(videoUrl: URL, config: GifToolParameter) async throws -> GifResult {
+        let asset = AVURLAsset(url: videoUrl)
         guard let reader = try? AVAssetReader(asset: asset) else {
             throw GifError.unableToReadFile
         }
@@ -65,16 +66,7 @@ extension URL {
         let readerOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: outputSettings)
         reader.add(readerOutput)
         reader.startReading()
-        
-        // An array where each index corresponds to the delay for that frame in seconds.
-        // Note that since it's regarding frames, the first frame would be the 0th index in the array.
      
-        
-        // Since there can be a disjoint mapping between frame delays
-        // and the frames in the video/pixel buffer (if we're lowering
-        // the
-        // frame rate) rather than messing around with a complicated mapping,
-        // just have a stack where we pop frame delays off as we use them
         var appliedFrameDelayStack = frameDelays
          
         try? LiveGifTool2.createDir(dirURL: config.gifTempDir)
@@ -154,7 +146,7 @@ extension URL {
         return GifResult.init(url: gifUrl, frames: uiImages)
     }
 
-    private func cgImageFromSampleBuffer(_ buffer: CMSampleBuffer) -> CGImage? {
+    private static func cgImageFromSampleBuffer(_ buffer: CMSampleBuffer) -> CGImage? {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(buffer) else {
             return nil
         }
@@ -174,15 +166,10 @@ extension URL {
         return image
     }
     
-    private func calculateFramesToRemove(desiredFrameRate: CGFloat, nominalFrameRate: CGFloat, nominalTotalFrames: Int) -> [Int] {
-        // Ensure the actual/nominal frame rate isn't already lower than the desired, in which case don't even worry about it
-        // Add a buffer of 2 so if it's close it won't freak out and cause a bunch of unnecessary conversion due to being so close
+    private static func calculateFramesToRemove(desiredFrameRate: CGFloat, nominalFrameRate: CGFloat, nominalTotalFrames: Int) -> [Int] {
         if desiredFrameRate < nominalFrameRate - 2 {
             let percentageOfFramesToRemove = 1.0 - (desiredFrameRate / nominalFrameRate)
             let totalFramesToRemove = Int(round(CGFloat(nominalTotalFrames) * percentageOfFramesToRemove))
-            
-            // We should remove a frame every `frameRemovalInterval` frames…
-            // Since we can't remove e.g.: the 3.7th frame, round that up to 4, and we'd remove the 4th frame, then the 7.4th -> 7th, etc.
             let frameRemovalInterval = CGFloat(nominalTotalFrames) / CGFloat(totalFramesToRemove)
             
             var framesToRemove: [Int] = []
@@ -200,7 +187,7 @@ extension URL {
         }
     }
     
-    func calculateFrameDelays(desiredFrameRate: CGFloat, nominalFrameRate: CGFloat, totalFrames: Int) -> [CGFloat] {
+    static func calculateFrameDelays(desiredFrameRate: CGFloat, nominalFrameRate: CGFloat, totalFrames: Int) -> [CGFloat] {
         // The GIF spec per W3 only allows hundredths of a second, which negatively
         // impacts our precision, so implement variable length delays to adjust for
         // more precision (https://www.w3.org/Graphics/GIF/spec-gif89a.txt).

@@ -18,6 +18,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		8A8C25B22B413EF000C4BA7B /* LiveGifKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = LiveGifKit; path = ..; sourceTree = "<group>"; };
 		8AE622882B2579E0004215B5 /* GifDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GifDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8AE6228B2B2579E0004215B5 /* GifDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifDemoApp.swift; sourceTree = "<group>"; };
 		8AE6228D2B2579E0004215B5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -43,6 +44,7 @@
 		8AE6227F2B2579E0004215B5 = {
 			isa = PBXGroup;
 			children = (
+				8A8C25B22B413EF000C4BA7B /* LiveGifKit */,
 				8AE6228A2B2579E0004215B5 /* GifDemo */,
 				8AE622892B2579E0004215B5 /* Products */,
 				8AE622A12B257B5A004215B5 /* Frameworks */,

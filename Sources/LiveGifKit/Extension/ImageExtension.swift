@@ -30,8 +30,29 @@ public extension UIImage {
         }
         return false
     }
+    
 }
 
+public extension UIImage {
+    func resize(scale: CGFloat = 0.5) -> UIImage {
+        let size = self.size
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let rect = CGRect(x: 0, y: 0, width: newSize.width, height: newSize.height)
+        
+        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+        self.draw(in: rect)
+        let newImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return newImage ?? self
+    }
+     
+    func resize(width: CGFloat = 1, height: CGFloat = 1) -> UIImage {
+        let widthRatio  = width  / size.width
+        let heightRatio = height / size.height
+        let scalingFactor = max(widthRatio, heightRatio)
+        return resize(scale: scalingFactor)
+    }
+}
 
 extension CGImage {
     func removeBackground(_ isTrue: Bool = true) async -> CGImage {

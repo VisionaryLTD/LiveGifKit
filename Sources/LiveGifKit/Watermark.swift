@@ -32,7 +32,6 @@ public struct WatermarkConfig {
 
 public extension UIImage {
     func watermark(watermark: WatermarkConfig) -> UIImage {
-        let imageOrientation = self.imageOrientation
         let textAttributes = [NSAttributedString.Key.foregroundColor:watermark.textColor,
                               NSAttributedString.Key.font:watermark.font,
                               NSAttributedString.Key.backgroundColor:watermark.bgColor]
@@ -44,7 +43,7 @@ public extension UIImage {
         self.draw(in: CGRectMake(0, 0, imageSize.width, imageSize.height))
         NSString(string: watermark.text).draw(in: frame, withAttributes: textAttributes)
         
-        guard var newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
+        guard let newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
         UIGraphicsEndImageContext()
         return newImage
     }
@@ -53,7 +52,7 @@ public extension UIImage {
         let imageSize = self.size
         UIGraphicsBeginImageContext(imageSize)
         self.draw(in: CGRectMake(0, 0, imageSize.width, imageSize.height))
-        guard var newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
+        guard let newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
         UIGraphicsEndImageContext()
         return newImage
     }

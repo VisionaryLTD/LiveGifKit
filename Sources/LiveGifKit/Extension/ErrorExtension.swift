@@ -6,6 +6,7 @@
 //
 
 import Foundation
+
 public enum GifError: Error {
     case unableToReadFile
     case unableToFindTrack

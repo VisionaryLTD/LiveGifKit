@@ -1,15 +1,6 @@
 {
   "pins" : [
     {
-      "identity" : "goodutils",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/grepug/GoodUtils.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "f3d57e4eafee9309326d986028b13c57225fb6e2"
-      }
-    },
-    {
       "identity" : "sdwebimage",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/SDWebImage/SDWebImage.git",

@@ -180,25 +180,6 @@ struct ContentView: View {
             self.task = Task {
                 guard let photoItem = self.photoItem else { return }
                 self.showPicker.toggle()
-                /// 静态图片
-//                if let data = try? await photoItem.loadTransferable(type: Data.self),
-//                   let img = UIImage(data: data),
-//                   let imgData = try? await self.gifTool?.removeBackground(uiImage: img),
-//                   let img2 = UIImage(data: imgData)
-//                {
-//                    
-//                    print("有静态图片")
-//                    await MainActor.run() {
-//                        self.images?.removeAll()
-//                        self.images?.append(img2)
-//                        self.photoItem = nil
-//                        print("哈哈哈: \(self.images?.count)")
-//                    }
-//                    
-//                }
-// 
-//               
-//                return
                 
                 guard let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self)else {  return }
                 

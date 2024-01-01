@@ -11,60 +11,6 @@ import Photos
 import PhotosUI
 import _PhotosUI_SwiftUI
 
-/// 生成的GIF
-public struct GifResult {
-    public let url: URL
-    public let frames: [UIImage]
-    public var data: Data? {
-        do {
-            return try Data(contentsOf: url)
-        } catch {
-            print("URL错误....")
-            return nil
-        }
-    }
-    
-#if DEBUG
-    public var totalTime: Double = 0
-#endif
-}
-
-/// 生成Gif的参数Model
-///
-///gifFPS: gif帧率 默认 30
-///watermarkInfo: 水印信息 默认为空
-///data: DataSource、livePhoto和图片两种方式
-///maxResolution: 图片大小 默认300
-///removeImageBgColor: 是否去背景
-public struct GifToolParameter {
-    var data: DataSource
-    var gifFPS: CGFloat
-    var watermark: WatermarkConfig?
-    var maxResolution: CGFloat
-    var removeBg: Bool
-    public enum DataSource {
-        case livePhoto(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat = 30)
-        case images(frames: [UIImage])
-    }
-    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat = 500, removeBg: Bool = false) {
-        self.gifFPS = gifFPS
-        self.watermark = watermark
-        self.data = data
-        self.maxResolution = maxResolution
-        self.removeBg = removeBg
-    }
-    
-    var livePhotoFPS: CGFloat {
-        switch self.data {
-        case .livePhoto(_, let livePhotoFPS):
-            return livePhotoFPS
-        case .images(_):
-            return 30
-        }
-    }
-    var gifTempDir: URL!
-}
-
 protocol GifTool {
     func save(method: Method) async throws
     func createGif(parameter: GifToolParameter) async throws -> GifResult
@@ -73,27 +19,6 @@ protocol GifTool {
 }
 
 public class LiveGifTool: GifTool {
-    
-    /// 去图片背景和空白部分
-    public func removeBackground(uiImage: UIImage) async throws -> Data? {
-        if let cgImage = uiImage.cgImage,
-           let cgImage2 = try await LiveGifTool2.removeBg(images: [cgImage]).first {
-            let image = UIImage(cgImage: cgImage2, scale: 1.0, orientation: uiImage.imageOrientation)
-            return image.pngData()
-        }
-        return nil
-    }
-    
-    var parameter: GifToolParameter!
-    var gifTempDir: URL
-    public init() {
-        self.gifTempDir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appending(path: "Gif/" + UUID().uuidString)
-    }
-    
-    deinit {
-         print("LiveGifTool deinit")
-    }
     
     /// 生成GIF
     ///
@@ -130,7 +55,7 @@ public class LiveGifTool: GifTool {
         let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
         guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
         do {
-            return try await videoUrl.convertToGIF(config: self.parameter)
+            return try await VideoGifHander.convertToGIF(videoUrl: videoUrl, config: self.parameter)
         } catch {
             throw error
         }
@@ -141,7 +66,7 @@ public class LiveGifTool: GifTool {
     /// images: GIF帧数组
     private func createImagesGif(images: [UIImage]) async throws -> GifResult {
         do {
-            return try await images.createGif(config: self.parameter)
+            return try await ImageGifHander.createGif(uiImages: images, config: self.parameter)
         } catch {
             throw error
         }
@@ -168,5 +93,26 @@ public class LiveGifTool: GifTool {
         } catch {
             throw error
         }
+    }
+    
+    /// 去图片背景和空白部分
+    public func removeBackground(uiImage: UIImage) async throws -> Data? {
+        if let cgImage = uiImage.cgImage,
+           let cgImage2 = try await LiveGifTool2.removeBg(images: [cgImage]).first {
+            let image = UIImage(cgImage: cgImage2, scale: 1.0, orientation: uiImage.imageOrientation)
+            return image.pngData()
+        }
+        return nil
+    }
+    
+    var parameter: GifToolParameter!
+    var gifTempDir: URL
+    public init() {
+        self.gifTempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "Gif/" + UUID().uuidString)
+    }
+    
+    deinit {
+         print("LiveGifTool deinit")
     }
 }

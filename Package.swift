@@ -12,17 +12,12 @@ let package = Package(
             name: "LiveGifKit",
             targets: ["LiveGifKit"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/grepug/GoodUtils.git", branch: "main"),
-    ],
+     
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "LiveGifKit",
-            dependencies: [
-                .product(name: "GoodUtils", package: "GoodUtils")
-            ]
+            name: "LiveGifKit"
         ),
     ]
 )

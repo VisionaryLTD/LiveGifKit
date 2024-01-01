@@ -12,7 +12,7 @@ import PhotosUI
 import _PhotosUI_SwiftUI
 
 struct LiveGifTool2 {
-    /// 转成视频
+    /// 转成视频url
     static func livePhotoConvertToVideo(livePhoto: PHLivePhoto, tempDir: URL) async throws -> URL? {
         let resources = PHAssetResource.assetResources(for: livePhoto)
         guard let videoResource = resources.first(where: { $0.type == .pairedVideo }) else {
