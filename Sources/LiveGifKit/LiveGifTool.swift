@@ -38,7 +38,7 @@ public class LiveGifTool: GifTool {
             result.totalTime = CFAbsoluteTimeGetCurrent() - startTime
 #endif
             return result
-        case .images(let frames):
+        case .images(let frames, _):
             var result =  try await self.createImagesGif(images: frames)
 #if DEBUG
             result.totalTime = CFAbsoluteTimeGetCurrent() - startTime

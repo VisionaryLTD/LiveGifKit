@@ -22,15 +22,29 @@ struct ImageGifHander {
             throw GifError.unableToCreateOutput
         }
         
+        /// 从相册选取的需要调整方向
+        var newUIImages = uiImages
+        switch config.data {
+            case .images(_, let adjustOrientation):
+                if adjustOrientation {
+                    newUIImages = newUIImages.map({ $0.adjustOrientation().resize(width: config.maxResolution)})
+                    print("调整了图片的方向")
+                }
+            default:
+                break
+        }
+        
         let fileProperties: [String: Any] = [
             kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFLoopCount as String: 0]
         ]
         let frameProperties: [String: Any] = [
             kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/config.gifFPS],
-            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(imageOrientation: uiImages.first?.imageOrientation ?? .right).rawValue
+            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(imageOrientation: newUIImages.first?.imageOrientation ?? .up).rawValue
         ]
+        
+     
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
-        var cgImages = uiImages.map({ $0.cgImage! })
+        var cgImages = newUIImages.map({ $0.cgImage! })
         if config.removeBg {
             cgImages = try await LiveGifTool2.removeBg(images: cgImages)
             try Task.checkCancellation()
@@ -54,5 +68,4 @@ struct ImageGifHander {
         }
         return GifResult.init(url: gifURL, frames: uiImages)
     }
-
 }
