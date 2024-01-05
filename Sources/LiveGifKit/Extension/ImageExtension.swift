@@ -31,6 +31,14 @@ public extension UIImage {
         return false
     }
     
+    func adjustOrientation() -> UIImage {
+           let imageSize = self.size
+           UIGraphicsBeginImageContext(imageSize)
+           self.draw(in: CGRectMake(0, 0, imageSize.width, imageSize.height))
+           guard let newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
+           UIGraphicsEndImageContext()
+           return newImage
+       }
 }
 
 public extension UIImage {

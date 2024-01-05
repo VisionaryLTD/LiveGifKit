@@ -11,7 +11,7 @@ import Photos
 import PhotosUI
 import _PhotosUI_SwiftUI
 
-struct LiveGifTool2 {
+extension LiveGifTool {
     /// 转成视频url
     static func livePhotoConvertToVideo(livePhoto: PHLivePhoto, tempDir: URL) async throws -> URL? {
         let resources = PHAssetResource.assetResources(for: livePhoto)

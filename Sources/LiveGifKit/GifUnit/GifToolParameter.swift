@@ -1,6 +1,6 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by 汤小军 on 2024/1/2.
 //
@@ -28,7 +28,7 @@ public struct GifToolParameter {
         case images(frames: [UIImage], adjustOrientation: Bool = false)
     }
     
-    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat = 400, removeBg: Bool = false) {
+    public init(data: DataSource, gifFPS: CGFloat = 30, watermark: WatermarkConfig? = nil, maxResolution: CGFloat = 500, removeBg: Bool = false) {
         self.gifFPS = gifFPS
         self.watermark = watermark
         self.data = data

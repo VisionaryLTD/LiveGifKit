@@ -15,43 +15,41 @@ import UIKit
 /// bgColor: 文字背景色
 /// location: WatermarkLocation 位置，可选值: topLeft、topRight、bottomLeft、bottomRight、center
 public struct WatermarkConfig {
-    public var text: String = "test"
-    public var font: UIFont = .systemFont(ofSize: 12)
-    public var textColor: UIColor = .red
-    public var bgColor: UIColor = .clear
     public var location: WatermarkLocation = .center
+    public let type: WatermarkType
+    public enum WatermarkType {
+        case text(text: String, font: UIFont = .systemFont(ofSize: 12), textColor: UIColor = .red, bgColor: UIColor = .clear)
+        case image(image: UIImage, width: CGFloat = 60)
+    }
     
-    public init(text: String, font: UIFont = .systemFont(ofSize: 12), textColor: UIColor = .red, bgColor: UIColor = .clear, location: WatermarkLocation = .center) {
-        self.text = text
-        self.font = font
-        self.textColor = textColor
-        self.bgColor = bgColor
+    public init(type: WatermarkType, location: WatermarkLocation = .center) {
+        self.type = type
         self.location = location
     }
 }
 
 public extension UIImage {
     func watermark(watermark: WatermarkConfig) -> UIImage {
-        let textAttributes = [NSAttributedString.Key.foregroundColor:watermark.textColor,
-                              NSAttributedString.Key.font:watermark.font,
-                              NSAttributedString.Key.backgroundColor:watermark.bgColor]
-        let textSize = NSString(string: watermark.text).size(withAttributes: textAttributes)
-        let imageSize = self.size
-        let frame = watermark.location.rect(imageSize: imageSize, watermarkSize: textSize)
+        let originImageSize = self.size
+        UIGraphicsBeginImageContext(originImageSize)
+        self.draw(in: CGRectMake(0, 0, originImageSize.width, originImageSize.height))
+
         
-        UIGraphicsBeginImageContext(imageSize)
-        self.draw(in: CGRectMake(0, 0, imageSize.width, imageSize.height))
-        NSString(string: watermark.text).draw(in: frame, withAttributes: textAttributes)
-        
-        guard let newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
-        UIGraphicsEndImageContext()
-        return newImage
-    }
-    
-    func adjustOrientation() -> UIImage {
-        let imageSize = self.size
-        UIGraphicsBeginImageContext(imageSize)
-        self.draw(in: CGRectMake(0, 0, imageSize.width, imageSize.height))
+        switch watermark.type {
+        case let .text(text, font, textColor, bgColor):
+            let textAttributes = [NSAttributedString.Key.foregroundColor: textColor,
+                                  NSAttributedString.Key.font: font,
+                                  NSAttributedString.Key.backgroundColor: bgColor]
+            let textSize = NSString(string: text).size(withAttributes: textAttributes)
+            let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: textSize)
+            NSString(string: text).draw(in: frame, withAttributes: textAttributes)
+            
+        case let .image(image, width):
+            let img = image.resize(width: width)
+            let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: img.size)
+            image.draw(in: frame)
+        }
+
         guard let newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
         UIGraphicsEndImageContext()
         return newImage
@@ -81,8 +79,7 @@ public enum WatermarkLocation: String, CaseIterable {
     }
     
     public var title: String {
-        switch self
-        {
+        switch self {
         case .bottomLeft:
             return "左下角"
         case .bottomRight:

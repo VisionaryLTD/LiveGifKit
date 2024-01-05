@@ -1,6 +1,6 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by 汤小军 on 2023/12/31.
 //
@@ -11,10 +11,11 @@ import UniformTypeIdentifiers
 
 struct ImageGifHander {
     static public func createGif(uiImages: [UIImage], config: GifToolParameter) async throws -> GifResult {
+        try Task.checkCancellation()
         if uiImages.isEmpty {
             throw GifError.gifResultNil
         }
-        try? LiveGifTool2.createDir(dirURL: config.gifTempDir)
+        try? LiveGifTool.createDir(dirURL: config.gifTempDir)
         let gifFileName = "\(Int(Date().timeIntervalSince1970)).gif"
         let gifURL = config.gifTempDir.appending(path: gifFileName)
       
@@ -39,19 +40,20 @@ struct ImageGifHander {
         ]
         let frameProperties: [String: Any] = [
             kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/config.gifFPS],
-            kCGImagePropertyOrientation as String: LiveGifTool2.getCGImageOrientation(imageOrientation: newUIImages.first?.imageOrientation ?? .up).rawValue
+            kCGImagePropertyOrientation as String: LiveGifTool.getCGImageOrientation(imageOrientation: newUIImages.first?.imageOrientation ?? .up).rawValue
         ]
         
      
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
         var cgImages = newUIImages.map({ $0.cgImage! })
         if config.removeBg {
-            cgImages = try await LiveGifTool2.removeBg(images: cgImages)
             try Task.checkCancellation()
+            cgImages = try await LiveGifTool.removeBg(images: cgImages)
         }
         
         var uiImages: [UIImage] = []
         for cgImage in cgImages {
+            try Task.checkCancellation()
             autoreleasepool {
                 var uiImage = UIImage(cgImage: cgImage)
                 if let watermark = config.watermark {

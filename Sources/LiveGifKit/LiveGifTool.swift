@@ -52,9 +52,9 @@ public class LiveGifTool: GifTool {
     ///livePhoto: PHLivePhoto
     ///PHLivePhoto: PHLivePhoto帧率
     private func createLivePhotoGif(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat) async throws -> GifResult {
-        let videoUrl = try? await LiveGifTool2.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
-        guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
         do {
+            let videoUrl = try await LiveGifTool.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
+            guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
             return try await VideoGifHander.convertToGIF(videoUrl: videoUrl, config: self.parameter)
         } catch {
             throw error
@@ -98,7 +98,7 @@ public class LiveGifTool: GifTool {
     /// 去图片背景和空白部分
     public func removeBackground(uiImage: UIImage) async throws -> Data? {
         if let cgImage = uiImage.cgImage,
-           let cgImage2 = try await LiveGifTool2.removeBg(images: [cgImage]).first {
+           let cgImage2 = try await LiveGifTool.removeBg(images: [cgImage]).first {
             let image = UIImage(cgImage: cgImage2, scale: 1.0, orientation: uiImage.imageOrientation)
             return image.pngData()
         }
@@ -107,9 +107,21 @@ public class LiveGifTool: GifTool {
     
     var parameter: GifToolParameter!
     var gifTempDir: URL
+    
     public init() {
         self.gifTempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "Gif/" + UUID().uuidString)
+        
+    }
+    
+    public func preheating() {
+        Task {
+            print("LiveGifTool ... 预热。。。。。")
+            let img = UIImage(named: "example", in: .module, with: nil)
+            let parameter = GifToolParameter(data: .images(frames: [img!]),  removeBg: true)
+            let result = try? await self.createGif(parameter: parameter)
+            print("预热的URL: \(String(describing: result?.url))")
+        }
     }
     
     deinit {
