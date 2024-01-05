@@ -9,9 +9,10 @@ import SwiftUI
 
 @main
 struct GifDemoApp: App {
+    @StateObject var vm = LiveGifViewModel()
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainView().environmentObject(vm)
         }
     }
 }

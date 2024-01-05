@@ -1,6 +1,6 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by 汤小军 on 2023/12/31.
 //
@@ -16,15 +16,17 @@ struct VideoGifHander {
     /// 创建GIF
     static func convertToGIF(videoUrl: URL, config: GifToolParameter) async throws -> GifResult {
         let asset = AVURLAsset(url: videoUrl)
+        try Task.checkCancellation()
         guard let reader = try? AVAssetReader(asset: asset) else {
             throw GifError.unableToReadFile
         }
-        
+        try Task.checkCancellation()
         guard let videoTrack = try? await asset.loadTracks(withMediaType: .video).first else {
             throw GifError.unableToFindTrack
         }
-        
+        try Task.checkCancellation()
         let videoTransform = try await videoTrack.load(.preferredTransform)
+        try Task.checkCancellation()
         var videoSize = try await videoTrack.load(.naturalSize).applying(videoTransform)
          
         let videoWidth = abs(videoSize.width * videoTransform.a) + abs(videoSize.height * videoTransform.c)
@@ -42,9 +44,11 @@ struct VideoGifHander {
             resultingSize = CGSize(width: round(cappedHeight * aspectRatio), height: cappedHeight)
         }
         print("视频大小: \(resultingSize)")
-        
+        try Task.checkCancellation()
         let duration: CGFloat = try await CGFloat(asset.load(.duration).seconds)
+        try Task.checkCancellation()
         let nominalFrameRate = try await CGFloat(videoTrack.load(.nominalFrameRate))
+        try Task.checkCancellation()
         let nominalTotalFrames = Int(round(duration * nominalFrameRate))
         
         /// 计算需要舍弃的帧
@@ -69,19 +73,20 @@ struct VideoGifHander {
      
         var appliedFrameDelayStack = frameDelays
          
-        try? LiveGifTool2.createDir(dirURL: config.gifTempDir)
+        try? LiveGifTool.createDir(dirURL: config.gifTempDir)
         let gifUrl = config.gifTempDir.appending(component: "\(Int(Date().timeIntervalSince1970)).gif")
         
         guard let destination = CGImageDestinationCreateWithURL(gifUrl as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
             throw GifError.unableToCreateOutput
         }
         var currentFrameIndex = 0
-        let imageOrientation = LiveGifTool2.getUIImageOrientation(transform: videoTransform)
+        let imageOrientation = LiveGifTool.getUIImageOrientation(transform: videoTransform)
         var sample: CMSampleBuffer? = readerOutput.copyNextSampleBuffer()
         var lastTime = CFAbsoluteTimeGetCurrent()
         
         var cgImages: [CGImage] = []
         while sample != nil {
+            try Task.checkCancellation()
             currentFrameIndex += 1
             if framesToRemove.contains(currentFrameIndex) {
                 sample = readerOutput.copyNextSampleBuffer()
@@ -89,11 +94,11 @@ struct VideoGifHander {
             }
  
             guard !appliedFrameDelayStack.isEmpty else { break }
-            let frameDelay = appliedFrameDelayStack.removeFirst()
+            let _ = appliedFrameDelayStack.removeFirst()
             autoreleasepool {
                 if let newSample = sample {
                     var cgImage: CGImage? = self.cgImageFromSampleBuffer(newSample)
-                    if var cgImage = cgImage  {
+                    if let cgImage = cgImage  {
                         autoreleasepool {
                             var ui = UIImage(cgImage: cgImage, scale: 1.0, orientation: imageOrientation)
                             ui = ui.resize(width: config.maxResolution )
@@ -118,9 +123,8 @@ struct VideoGifHander {
         ]
         
         /// 移除图片背景
-        let endTime2 = CFAbsoluteTimeGetCurrent()
         if config.removeBg {
-            cgImages = try await LiveGifTool2.removeBg(images: cgImages)
+            cgImages = try await LiveGifTool.removeBg(images: cgImages)
             try Task.checkCancellation()
             print("去背景耗时: \(CFAbsoluteTimeGetCurrent() - lastTime)")
             lastTime = CFAbsoluteTimeGetCurrent()
@@ -128,6 +132,7 @@ struct VideoGifHander {
 
         var uiImages: [UIImage] = []
         for cgImage in cgImages {
+            try Task.checkCancellation()
             autoreleasepool {
                 var uiImage = UIImage(cgImage: cgImage)
                 if let watermark = config.watermark {
