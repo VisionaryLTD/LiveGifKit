@@ -11,7 +11,6 @@ import CoreImage.CIFilterBuiltins
 import UIKit
 
 public extension UIImage {
-    
     func recognition() -> Bool {
         guard let cgImage = self.cgImage else { return false }
         let requests = [
