@@ -116,6 +116,7 @@ class LiveGifViewModel: ObservableObject {
             do {
               let result = try await self.gifTool?.createGif(parameter: parameter)
               self.gifResult = result
+              self.photoItem = nil
             } catch {
                 self.photoItem = nil
                 print("requestImages error: \(error)")

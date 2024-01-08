@@ -15,17 +15,18 @@ import UIKit
 /// bgColor: 文字背景色
 /// location: WatermarkLocation 位置，可选值: topLeft、topRight、bottomLeft、bottomRight、center
 public struct WatermarkConfig {
-    public var location: WatermarkLocation = .center
-    public var offset: CGFloat = 8
+    public var location: WatermarkLocation
+    public var offset: CGPoint
     public let type: WatermarkType
     public enum WatermarkType {
         case text(text: String, font: UIFont = .systemFont(ofSize: 12), textColor: UIColor = .red, bgColor: UIColor = .clear)
         case image(image: UIImage, width: CGFloat = 60)
     }
     
-    public init(type: WatermarkType, location: WatermarkLocation = .center) {
+    public init(type: WatermarkType, location: WatermarkLocation = .center, offset: CGPoint = .init(x: 8, y: 8)) {
         self.type = type
         self.location = location
+        self.offset = offset
     }
 }
 
@@ -64,16 +65,16 @@ public enum WatermarkLocation: String, CaseIterable {
     case bottomRight
     case center
     
-    func rect(imageSize: CGSize, watermarkSize: CGSize, offset: CGFloat) -> CGRect {
+    func rect(imageSize: CGSize, watermarkSize: CGSize, offset: CGPoint) -> CGRect {
         switch self {
         case .topLeft:
-            return CGRect(origin: CGPoint(x: offset, y: offset), size: watermarkSize)
+            return CGRect(origin: offset, size: watermarkSize)
         case .topRight:
-            return CGRect(origin: CGPoint(x: imageSize.width - watermarkSize.width - offset, y: offset), size: watermarkSize)
+            return CGRect(origin: CGPoint(x: imageSize.width - watermarkSize.width - offset.x, y: offset.y), size: watermarkSize)
         case .bottomLeft:
-            return CGRect(origin: CGPoint(x: offset, y: imageSize.height - watermarkSize.height - offset), size: watermarkSize)
+            return CGRect(origin: CGPoint(x: offset.x, y: imageSize.height - watermarkSize.height - offset.y), size: watermarkSize)
         case .bottomRight:
-            return CGRect(origin: CGPoint(x: imageSize.width - watermarkSize.width - offset, y: imageSize.height - watermarkSize.height - offset), size: watermarkSize)
+            return CGRect(origin: CGPoint(x: imageSize.width - watermarkSize.width - offset.x, y: imageSize.height - watermarkSize.height - offset.y), size: watermarkSize)
         case .center:
             return CGRect(origin: CGPoint(x: imageSize.width / 2 - watermarkSize.width / 2, y: imageSize.height / 2 - watermarkSize.height / 2), size: watermarkSize)
         }
