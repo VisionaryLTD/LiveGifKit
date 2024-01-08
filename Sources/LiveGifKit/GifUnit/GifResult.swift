@@ -1,6 +1,6 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by 汤小军 on 2024/1/1.
 //
@@ -14,12 +14,7 @@ public struct GifResult {
     public let url: URL
     public let frames: [UIImage]
     public var data: Data? {
-        do {
-            return try Data(contentsOf: url)
-        } catch {
-            print("URL错误....")
-            return nil
-        }
+        return try? Data(contentsOf: url)
     }
     
 #if DEBUG

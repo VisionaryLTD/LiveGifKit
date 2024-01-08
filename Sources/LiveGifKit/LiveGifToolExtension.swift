@@ -19,7 +19,7 @@ extension LiveGifTool {
             return nil
         }
         
-        try? self.createDir(dirURL: tempDir)
+        try self.createDir(dirURL: tempDir)
         let videoURL = tempDir.appendingPathComponent("\(Date())" + videoResource.originalFilename)
         print("视频临时目录: \(videoURL)")
         do {
@@ -34,11 +34,7 @@ extension LiveGifTool {
     
     static func createDir(dirURL: URL) throws {
         if !FileManager.default.fileExists(atPath: dirURL.path) {
-            do {
-                try FileManager.default.createDirectory(atPath: dirURL.path, withIntermediateDirectories: true, attributes: nil)
-            } catch {
-                throw error
-            }
+            try FileManager.default.createDirectory(atPath: dirURL.path, withIntermediateDirectories: true, attributes: nil)
         }
     }
     
@@ -101,7 +97,9 @@ extension LiveGifTool {
                     newImages.append(cgImg)
                 }
             }
-            newImages = newImages.cropImages(toRect: finalRect!)
+            if let finalRect = finalRect {
+                newImages = newImages.cropImages(toRect: finalRect)
+            }
             return newImages
         } onCancel: {
             tasks.forEach { task in

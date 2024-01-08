@@ -15,7 +15,7 @@ protocol GifTool {
     func save(method: Method) async throws
     func createGif(parameter: GifToolParameter) async throws -> GifResult
     func removeBackground(uiImage: UIImage) async throws -> Data?
-    func cleanup()
+    func cleanup() throws
 }
 
 public class LiveGifTool: GifTool {
@@ -52,47 +52,31 @@ public class LiveGifTool: GifTool {
     ///livePhoto: PHLivePhoto
     ///PHLivePhoto: PHLivePhoto帧率
     private func createLivePhotoGif(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat) async throws -> GifResult {
-        do {
-            let videoUrl = try await LiveGifTool.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
-            guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
-            return try await VideoGifHander.convertToGIF(videoUrl: videoUrl, config: self.parameter)
-        } catch {
-            throw error
-        }
+        let videoUrl = try await LiveGifTool.livePhotoConvertToVideo(livePhoto: livePhoto, tempDir: self.gifTempDir)
+        guard let videoUrl = videoUrl else { throw GifError.unableToFindvideoUrl }
+        return try await VideoGifHander.convertToGIF(videoUrl: videoUrl, config: self.parameter)
     }
     
     /// 通过图片合成GIF
     ///
     /// images: GIF帧数组
     private func createImagesGif(images: [UIImage]) async throws -> GifResult {
-        do {
-            return try await ImageGifHander.createGif(uiImages: images, config: self.parameter)
-        } catch {
-            throw error
-        }
+        return try await ImageGifHander.createGif(uiImages: images, config: self.parameter)
     }
     
     /// 删除生成GIF的文件目录
-    public func cleanup() {
-        do {
-            print("删除目录: \(self.gifTempDir.path())")
-            if FileManager.default.fileExists(atPath: self.gifTempDir.path) {
-                try FileManager.default.removeItem(atPath: self.gifTempDir.path())
-            } else {
-                print("目录已被删除")
-            }
-        } catch {
-            print("删除目录失败: \(self.gifTempDir) \(error)")
+    public func cleanup() throws {
+        print("删除目录: \(self.gifTempDir.path())")
+        if FileManager.default.fileExists(atPath: self.gifTempDir.path) {
+            try FileManager.default.removeItem(atPath: self.gifTempDir.path())
+        } else {
+            print("目录已被删除")
         }
     }
     
     /// 保存相册
     public func save(method: Method) async throws {
-        do {
-            try await AlbumTool.save(method: method)
-        } catch {
-            throw error
-        }
+        try await AlbumTool.save(method: method)
     }
     
     /// 去图片背景和空白部分
@@ -114,14 +98,13 @@ public class LiveGifTool: GifTool {
         
     }
     
-    public func preheating() {
-        Task {
-            print("LiveGifTool ... 预热。。。。。")
-            let img = UIImage(named: "example", in: .module, with: nil)
-            let parameter = GifToolParameter(data: .images(frames: [img!]),  removeBg: true)
-            let result = try? await self.createGif(parameter: parameter)
-            print("预热的URL: \(String(describing: result?.url))")
-        }
+    public func preheating() async throws {
+        print("LiveGifTool ... 预热。。。。。")
+        let img = UIImage(named: "example", in: .module, with: nil)
+        let parameter = GifToolParameter(data: .images(frames: [img!]),  removeBg: true)
+        let result = try await self.createGif(parameter: parameter)
+        try self.cleanup()
+        print("预热的URL: \(String(describing: result.url))")
     }
     
     deinit {

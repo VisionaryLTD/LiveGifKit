@@ -51,7 +51,10 @@ class LiveGifViewModel: ObservableObject {
     var task: Task<(), Never>? = nil
     
     init() {
-        LiveGifTool().preheating()
+        Task {
+           try? await LiveGifTool().preheating()
+        }
+        
     }
     
     func requestPickerItem() {
@@ -149,7 +152,7 @@ class LiveGifViewModel: ObservableObject {
     }
     
     func cleanUp() {
-        self.gifTool?.cleanup()
+        try? self.gifTool?.cleanup()
         self.gifTool = nil
     }
     

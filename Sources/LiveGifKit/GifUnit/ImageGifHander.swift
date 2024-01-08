@@ -15,7 +15,7 @@ struct ImageGifHander {
         if uiImages.isEmpty {
             throw GifError.gifResultNil
         }
-        try? LiveGifTool.createDir(dirURL: config.gifTempDir)
+        try LiveGifTool.createDir(dirURL: config.gifTempDir)
         let gifFileName = "\(Int(Date().timeIntervalSince1970)).gif"
         let gifURL = config.gifTempDir.appending(path: gifFileName)
       

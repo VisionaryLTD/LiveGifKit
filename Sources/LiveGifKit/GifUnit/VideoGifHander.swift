@@ -21,9 +21,10 @@ struct VideoGifHander {
             throw GifError.unableToReadFile
         }
         try Task.checkCancellation()
-        guard let videoTrack = try? await asset.loadTracks(withMediaType: .video).first else {
+        guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
             throw GifError.unableToFindTrack
         }
+        
         try Task.checkCancellation()
         let videoTransform = try await videoTrack.load(.preferredTransform)
         try Task.checkCancellation()
@@ -73,7 +74,7 @@ struct VideoGifHander {
      
         var appliedFrameDelayStack = frameDelays
          
-        try? LiveGifTool.createDir(dirURL: config.gifTempDir)
+        try LiveGifTool.createDir(dirURL: config.gifTempDir)
         let gifUrl = config.gifTempDir.appending(component: "\(Int(Date().timeIntervalSince1970)).gif")
         
         guard let destination = CGImageDestinationCreateWithURL(gifUrl as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
