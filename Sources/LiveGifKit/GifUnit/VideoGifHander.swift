@@ -184,16 +184,10 @@ struct VideoGifHander {
     }
     
     static func calculateFrameDelays(desiredFrameRate: CGFloat, nominalFrameRate: CGFloat, totalFrames: Int) -> [CGFloat] {
-        // The GIF spec per W3 only allows hundredths of a second, which negatively
-        // impacts our precision, so implement variable length delays to adjust for
-        // more precision (https://www.w3.org/Graphics/GIF/spec-gif89a.txt).
-        //
-        // In other words, if we'd like a 0.033 frame delay, the GIF spec would treat
-        // it as 0.03, causing our GIF to be shorter/sped up, in order to get around
-        // this make 70% of the frames 0.03, and 30% 0.04.
-        //
-        // In this section, determine the ratio of frames ceil'd to the next hundredth, versus the amount floor'd to the current hundredth.
-        let desiredFrameDelay: CGFloat = 1.0 / min(desiredFrameRate, nominalFrameRate)
+      
+        /// 修复分母为0的bug
+        let normalFrameRate = CGFloat(Int(nominalFrameRate))
+        let desiredFrameDelay: CGFloat = 1.0 / min(desiredFrameRate, normalFrameRate)
         let flooredHundredth: CGFloat = floor(desiredFrameDelay * 100.0) / 100.0 // AKA "slow frame delay"
         let remainder = desiredFrameDelay - flooredHundredth
         let nextHundredth = flooredHundredth + 0.01 // AKA "fast frame delay"
@@ -201,12 +195,9 @@ struct VideoGifHander {
         let percentageOfCurrentHundredth = 1.0 - percentageOfNextHundredth
         
         let totalSlowFrames = Int(round(CGFloat(totalFrames) * percentageOfCurrentHundredth))
-        
-        // Now determine how they should be distributed, we obviously don't just
-        // want all the longer ones at the end (would make first portion feel fast,
-        // second part feel slow), so evenly distribute them along the GIF timeline.
-        //
-        // Determine the spacing in relation to slow frames, so for instance if it's 1.7, the round(1.7) = 2nd frame would be slow, then the round(1.7 * 2) = 3rd frame would be slow, etc.
+       
+        assert(totalSlowFrames > 0, "totalSlowFrames is zero")
+         
         let spacingInterval = CGFloat(totalFrames) / CGFloat(totalSlowFrames)
         
         // Initialize it to start with all the fast frame delays, and then we'll identify which ones will be slow and modify them in the loop to follow
