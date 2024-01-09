@@ -29,22 +29,12 @@ struct VideoGifHander {
         let videoTransform = try await videoTrack.load(.preferredTransform)
         try Task.checkCancellation()
         var videoSize = try await videoTrack.load(.naturalSize).applying(videoTransform)
-         
+        print("视频大小: \(videoSize)")
         let videoWidth = abs(videoSize.width * videoTransform.a) + abs(videoSize.height * videoTransform.c)
         let videoHeight = abs(videoSize.width * videoTransform.b) + abs(videoSize.height * videoTransform.d)
         let videoFrame = CGRect(x: 0, y: 0, width: videoWidth, height: videoHeight)
-        let aspectRatio = videoFrame.width / videoFrame.height
         videoSize = videoFrame.size
-        let resultingSize: CGSize
-        
-        if videoSize.width > videoSize.height {
-            let cappedWidth = round(min(config.maxResolution, videoSize.width))
-            resultingSize = CGSize(width: cappedWidth, height: round(cappedWidth / aspectRatio))
-        } else {
-            let cappedHeight = round(min(config.maxResolution, videoSize.height))
-            resultingSize = CGSize(width: round(cappedHeight * aspectRatio), height: cappedHeight)
-        }
-        print("视频大小: \(resultingSize)")
+ 
         try Task.checkCancellation()
         let duration: CGFloat = try await CGFloat(asset.load(.duration).seconds)
         try Task.checkCancellation()
@@ -64,8 +54,8 @@ struct VideoGifHander {
         /// 视频输出设置
         let outputSettings: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-            kCVPixelBufferWidthKey as String: resultingSize.width,
-            kCVPixelBufferHeightKey as String: resultingSize.height
+            kCVPixelBufferWidthKey as String: videoSize.width,
+            kCVPixelBufferHeightKey as String: videoSize.height
         ]
         
         let readerOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: outputSettings)

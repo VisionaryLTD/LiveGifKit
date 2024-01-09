@@ -64,16 +64,6 @@ public class LiveGifTool: GifTool {
         return try await ImageGifHander.createGif(uiImages: images, config: self.parameter)
     }
     
-    /// 删除生成GIF的文件目录
-    public func cleanup() throws {
-        print("删除目录: \(self.gifTempDir.path())")
-        if FileManager.default.fileExists(atPath: self.gifTempDir.path) {
-            try FileManager.default.removeItem(atPath: self.gifTempDir.path())
-        } else {
-            print("目录已被删除")
-        }
-    }
-    
     /// 保存相册
     public func save(method: Method) async throws {
         try await AlbumTool.save(method: method)
@@ -107,7 +97,29 @@ public class LiveGifTool: GifTool {
         print("预热的URL: \(String(describing: result.url))")
     }
     
+    ///清空tmp目录
+    public static func cleanupTmp() throws {
+        let tempDirPath = NSTemporaryDirectory()
+        print("清空tmp目录: \(tempDirPath)")
+        do {
+            try FileManager.default.removeItem(atPath: tempDirPath)
+        } catch {
+            print("Error deleting temp files: \(error)")
+            throw error
+        }
+    }
+    
+    /// 删除生成GIF的文件目录
+    public func cleanup() throws {
+        print("删除目录: \(self.gifTempDir.path())")
+        if FileManager.default.fileExists(atPath: self.gifTempDir.path) {
+            try FileManager.default.removeItem(atPath: self.gifTempDir.path())
+        } else {
+            print("目录已被删除")
+        }
+    }
+    
     deinit {
-         print("LiveGifTool deinit")
+        print("LiveGifTool deinit")
     }
 }
