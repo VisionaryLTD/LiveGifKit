@@ -97,25 +97,21 @@ public class LiveGifTool: GifTool {
         print("预热的URL: \(String(describing: result.url))")
     }
     
-    ///清空tmp目录
-    public static func cleanupTmp() throws {
-        let tempDirPath = NSTemporaryDirectory()
-        print("清空tmp目录: \(tempDirPath)")
-        do {
-            try FileManager.default.removeItem(atPath: tempDirPath)
-        } catch {
-            print("Error deleting temp files: \(error)")
-            throw error
-        }
-    }
-    
     /// 删除生成GIF的文件目录
     public func cleanup() throws {
-        print("删除目录: \(self.gifTempDir.path())")
         if FileManager.default.fileExists(atPath: self.gifTempDir.path) {
+            print("删除GIF目录: \(self.gifTempDir.path())")
             try FileManager.default.removeItem(atPath: self.gifTempDir.path())
         } else {
-            print("目录已被删除")
+            print("GIF目录不存在")
+        }
+        
+        let tempDirPath = NSTemporaryDirectory() + "/live-photo-bundle"
+        if FileManager.default.fileExists(atPath: tempDirPath) {
+            print("删除live-photo-bundle目录: \(tempDirPath)")
+            try FileManager.default.removeItem(atPath: tempDirPath)
+        } else {
+            print("live-photo-bundle目录不存在")
         }
     }
     
