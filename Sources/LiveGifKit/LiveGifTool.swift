@@ -88,6 +88,7 @@ public class LiveGifTool: GifTool {
         
     }
     
+    /// 预热
     public func preheating() async throws {
         print("LiveGifTool ... 预热。。。。。")
         let img = UIImage(named: "example", in: .module, with: nil)
@@ -95,6 +96,15 @@ public class LiveGifTool: GifTool {
         let result = try await self.createGif(parameter: parameter)
         try self.cleanup()
         print("预热的URL: \(String(describing: result.url))")
+    }
+    
+    /// 删除tmp文件夹
+    public static func cleanupAllTmp() throws {
+        let tempDir = NSTemporaryDirectory()
+        if FileManager.default.fileExists(atPath: tempDir) {
+            print("删除tmp目录: \(tempDir)")
+            try FileManager.default.removeItem(atPath: tempDir)
+        }
     }
     
     /// 删除生成GIF的文件目录
@@ -108,28 +118,25 @@ public class LiveGifTool: GifTool {
         }
         
         print("检查live-photo-bundle目录")
-         let livePhotoBundlePath = NSTemporaryDirectory() + "/live-photo-bundle"
+        let livePhotoBundlePath = NSTemporaryDirectory() + "/live-photo-bundle"
         let fileList = try self.getFileList(path: livePhotoBundlePath)
         let sortedFileList = fileList.sorted(by: { $0.key < $1.key })
         let fileNameList = sortedFileList.filter({ $0.value.hasSuffix(".pvt")}).map({ ($0.value as NSString).lastPathComponent.replacingOccurrences(of: ".pvt", with: "") })
         print("文件名称: \(fileNameList)")
-         
         print("live-photo-bundle目录文件总个数: \(sortedFileList.count)")
         for (date, value) in sortedFileList {
-            print("所有的的时间: \(date) -- \(value)")
+            print("!!!: \(date) -- \(value)")
         }
-         if fileNameList.count > 2 {
-             let needDeleteFile = fileNameList.prefix(1)
-            
-             for (date, url) in sortedFileList {
-                 for deleteFileName in needDeleteFile {
-                     if url.contains(deleteFileName) {
-                         print("删除的文件时间: \(date)\nurl:\(url)")
-                         try self.deleteFilePath(path: url)
-                     }
-                 }
-             }
-         }
+        if fileNameList.count > 1 {
+            if let saveFileName = fileNameList.suffix(1).first {
+                for (date, url) in sortedFileList {
+                    if !url.contains(saveFileName) {
+                        print("删除的文件时间: \(date)\nurl:\(url)")
+                        try self.deleteFilePath(path: url)
+                    }
+                }
+            }
+        }
     }
     
     func deleteFilePath(path: String) throws {
@@ -137,6 +144,7 @@ public class LiveGifTool: GifTool {
             try FileManager.default.removeItem(atPath: path)
         }
     }
+    
     func getFileList(path: String) throws -> [Date: String] {
         var files = [Date: String]()
         if let enumerator = FileManager.default.enumerator(atPath: path){
@@ -151,6 +159,7 @@ public class LiveGifTool: GifTool {
         }
         return files
     }
+    
     deinit {
         print("LiveGifTool deinit")
     }
