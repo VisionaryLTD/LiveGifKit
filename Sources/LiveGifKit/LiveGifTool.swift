@@ -99,22 +99,58 @@ public class LiveGifTool: GifTool {
     
     /// 删除生成GIF的文件目录
     public func cleanup() throws {
-        if FileManager.default.fileExists(atPath: self.gifTempDir.path) {
-            print("删除GIF目录: \(self.gifTempDir.path())")
-            try FileManager.default.removeItem(atPath: self.gifTempDir.path())
+        let gifDirPath = NSTemporaryDirectory() + "/Gif/"
+        if FileManager.default.fileExists(atPath: gifDirPath) {
+            print("删除GIF目录: \(gifDirPath)")
+            try FileManager.default.removeItem(atPath: gifDirPath)
         } else {
             print("GIF目录不存在")
         }
         
-        let tempDirPath = NSTemporaryDirectory() + "/live-photo-bundle"
-        if FileManager.default.fileExists(atPath: tempDirPath) {
-            print("删除live-photo-bundle目录: \(tempDirPath)")
-            try FileManager.default.removeItem(atPath: tempDirPath)
-        } else {
-            print("live-photo-bundle目录不存在")
+        print("检查live-photo-bundle目录")
+         let livePhotoBundlePath = NSTemporaryDirectory() + "/live-photo-bundle"
+        let fileList = try self.getFileList(path: livePhotoBundlePath)
+        let sortedFileList = fileList.sorted(by: { $0.key < $1.key })
+        let fileNameList = sortedFileList.filter({ $0.value.hasSuffix(".pvt")}).map({ ($0.value as NSString).lastPathComponent.replacingOccurrences(of: ".pvt", with: "") })
+        print("文件名称: \(fileNameList)")
+         
+        print("live-photo-bundle目录文件总个数: \(sortedFileList.count)")
+        for (date, value) in sortedFileList {
+            print("所有的的时间: \(date) -- \(value)")
         }
+         if fileNameList.count > 2 {
+             let needDeleteFile = fileNameList.prefix(1)
+            
+             for (date, url) in sortedFileList {
+                 for deleteFileName in needDeleteFile {
+                     if url.contains(deleteFileName) {
+                         print("删除的文件时间: \(date)\nurl:\(url)")
+                         try self.deleteFilePath(path: url)
+                     }
+                 }
+             }
+         }
     }
     
+    func deleteFilePath(path: String) throws {
+        if FileManager.default.fileExists(atPath: path) {
+            try FileManager.default.removeItem(atPath: path)
+        }
+    }
+    func getFileList(path: String) throws -> [Date: String] {
+        var files = [Date: String]()
+        if let enumerator = FileManager.default.enumerator(atPath: path){
+            while let filePath = enumerator.nextObject() as? String {
+                let fullPath = "\(path)/\(filePath)"
+                let fileAttributes = try FileManager.default.attributesOfItem(atPath: fullPath)
+                // 从文件属性中获取它的创建日期
+                if let creationDate = fileAttributes[FileAttributeKey.creationDate] as? Date {
+                    files[creationDate] = fullPath
+                }
+            }
+        }
+        return files
+    }
     deinit {
         print("LiveGifTool deinit")
     }

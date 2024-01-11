@@ -135,7 +135,9 @@ struct VideoGifHander {
         }
         
         print("合成GIF耗时: \(CFAbsoluteTimeGetCurrent() - lastTime)")
+        try Task.checkCancellation()
         let didCreateGIF = CGImageDestinationFinalize(destination)
+        try Task.checkCancellation()
         guard didCreateGIF else {
             throw GifError.unknown
         }
