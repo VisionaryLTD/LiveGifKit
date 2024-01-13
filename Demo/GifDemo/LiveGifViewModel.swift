@@ -128,7 +128,15 @@ class LiveGifViewModel: ObservableObject {
     func getWaterConfig() -> WatermarkConfig? {
         var waterConfig: WatermarkConfig? = nil
         if !imageWatermark, self.watermarkText.count > 0 {
-            waterConfig = WatermarkConfig(type: .text(text: self.watermarkText, textColor: UIColor(self.selectedColor)), location: self.watermarkLocation)
+//            waterConfig = WatermarkConfig(type: .text(text: self.watermarkText, textColor: UIColor(self.selectedColor)), location: self.watermarkLocation)
+            let text = "Hello, World!"
+            let attributedString = NSAttributedString(string: text, attributes: [
+                .font: UIFont.systemFont(ofSize: 24),
+                .foregroundColor: UIColor.red,
+                .paragraphStyle: NSParagraphStyle.default
+            ])
+            waterConfig = WatermarkConfig(type: .attributeText(text: attributedString))
+            waterConfig?.origin = .init(x: 30, y: 40)
         } else if imageWatermark, let img = UIImage(named: "test") {
             waterConfig = WatermarkConfig(type: .image(image: img, width: 100), location: self.watermarkLocation)
         }

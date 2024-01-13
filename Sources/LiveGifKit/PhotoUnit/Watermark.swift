@@ -18,8 +18,10 @@ public struct WatermarkConfig {
     public var location: WatermarkLocation
     public var offset: CGPoint
     public let type: WatermarkType
+    public var origin: CGPoint?
     public enum WatermarkType {
-        case text(text: String, font: UIFont = .systemFont(ofSize: 12), textColor: UIColor = .red, bgColor: UIColor = .clear)
+        case text(text: String, font: UIFont = .boldSystemFont(ofSize: 62), textColor: UIColor = .red, bgColor: UIColor = .clear)
+        case attributeText(text: NSAttributedString)
         case image(image: UIImage, width: CGFloat = 60)
     }
     
@@ -36,20 +38,36 @@ public extension UIImage {
         UIGraphicsBeginImageContext(originImageSize)
         self.draw(in: CGRectMake(0, 0, originImageSize.width, originImageSize.height))
 
-        
         switch watermark.type {
         case let .text(text, font, textColor, bgColor):
             let textAttributes = [NSAttributedString.Key.foregroundColor: textColor,
                                   NSAttributedString.Key.font: font,
                                   NSAttributedString.Key.backgroundColor: bgColor]
             let textSize = NSString(string: text).size(withAttributes: textAttributes)
-            let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: textSize, offset: watermark.offset)
-            NSString(string: text).draw(in: frame, withAttributes: textAttributes)
+            if let origin = watermark.origin {
+                NSString(string: text).draw(in: CGRect(origin: origin, size: textSize), withAttributes: textAttributes)
+            } else {
+                let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: textSize, offset: watermark.offset)
+                NSString(string: text).draw(in: frame, withAttributes: textAttributes)
+            }
+            
+        case let .attributeText(text: text):
+            let textSize = text.size()
+            if let origin = watermark.origin {
+                text.draw(in: CGRect(origin: origin, size: textSize))
+            } else {
+                let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: textSize, offset: watermark.offset)
+                text.draw(in: frame)
+            }
             
         case let .image(image, width):
             let img = image.resize(width: width)
-            let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: img.size, offset: watermark.offset)
-            image.draw(in: frame)
+            if let origin = watermark.origin {
+                image.draw(in: CGRect(origin: origin, size: img.size))
+            } else {
+                let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: img.size, offset: watermark.offset)
+                image.draw(in: frame)
+            }
         }
 
         guard let newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
