@@ -36,7 +36,7 @@ class LiveGifViewModel: ObservableObject {
     /// 水印功能
     @Published var watermarkText: String = ""
     @Published var selectedColor = Color.red
-    @Published var watermarkLocation: WatermarkLocation = .center
+    @Published var watermarkLocation: DecoratorLocation = .center
     @Published var showWatermarkLocation = false
     
     /// 推荐功能
@@ -88,7 +88,7 @@ class LiveGifViewModel: ObservableObject {
     
     func requestLivePhoto() {
         guard let livePhoto = livePhoto else { return }
-        let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, watermark: getWaterConfig(), removeBg: self.removeBg)
+        let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, imageDecorate: getWaterConfig(), removeBg: self.removeBg)
     
         let task = Task {
             do {
@@ -110,7 +110,7 @@ class LiveGifViewModel: ObservableObject {
         self.gifTool = nil
         self.gifTool = LiveGifTool()
       
-        let parameter = GifToolParameter(data: .images(frames: getRequestImages(), adjustOrientation: self.isShowStaticImage == true), gifFPS: self.giffps, watermark: getWaterConfig(), removeBg: self.removeBg)
+        let parameter = GifToolParameter(data: .images(frames: getRequestImages(), adjustOrientation: self.isShowStaticImage == true), gifFPS: self.giffps, imageDecorate: getWaterConfig(), removeBg: self.removeBg)
 
         let task = Task {
             do {
@@ -125,8 +125,8 @@ class LiveGifViewModel: ObservableObject {
         self.task = task
     }
     
-    func getWaterConfig() -> WatermarkConfig? {
-        var waterConfig: WatermarkConfig? = nil
+    func getWaterConfig() -> ImageDecorateConfig? {
+        var waterConfig: ImageDecorateConfig? = nil
         if !imageWatermark, self.watermarkText.count > 0 {
 //            waterConfig = WatermarkConfig(type: .text(text: self.watermarkText, textColor: UIColor(self.selectedColor)), location: self.watermarkLocation)
             let text = "Hello, World!"
@@ -135,10 +135,10 @@ class LiveGifViewModel: ObservableObject {
                 .foregroundColor: UIColor.red,
                 .paragraphStyle: NSParagraphStyle.default
             ])
-            waterConfig = WatermarkConfig(type: .attributeText(text: attributedString))
+            waterConfig = ImageDecorateConfig(type: .attributeText(text: attributedString))
             waterConfig?.origin = .init(x: 30, y: 40)
         } else if imageWatermark, let img = UIImage(named: "test") {
-            waterConfig = WatermarkConfig(type: .image(image: img, width: 100), location: self.watermarkLocation)
+            waterConfig = ImageDecorateConfig(type: .image(image: img, width: 100), location: self.watermarkLocation)
         }
         return waterConfig
     }

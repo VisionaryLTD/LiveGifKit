@@ -13,19 +13,19 @@ import UIKit
 /// font: 文字字体
 /// textColor: 文字颜色
 /// bgColor: 文字背景色
-/// location: WatermarkLocation 位置，可选值: topLeft、topRight、bottomLeft、bottomRight、center
+/// location: DecoratorLocation 位置，可选值: topLeft、topRight、bottomLeft、bottomRight、center
 public struct ImageDecorateConfig {
     public var location: DecoratorLocation
     public var offset: CGPoint
-    public let type: WatermarkType
+    public let type: DecoratorType
     public var origin: CGPoint?
-    public enum WatermarkType {
+    public enum DecoratorType {
         case text(text: String, font: UIFont = .boldSystemFont(ofSize: 62), textColor: UIColor = .red, bgColor: UIColor = .clear)
         case attributeText(text: NSAttributedString)
         case image(image: UIImage, width: CGFloat = 60)
     }
     
-    public init(type: WatermarkType, location: DecoratorLocation = .center, offset: CGPoint = .init(x: 8, y: 8)) {
+    public init(type: DecoratorType, location: DecoratorLocation = .center, offset: CGPoint = .init(x: 8, y: 8)) {
         self.type = type
         self.location = location
         self.offset = offset
@@ -33,39 +33,39 @@ public struct ImageDecorateConfig {
 }
 
 public extension UIImage {
-    func watermark(watermark: ImageDecorateConfig) -> UIImage {
+    func decorate(config: ImageDecorateConfig) -> UIImage {
         let originImageSize = self.size
         UIGraphicsBeginImageContext(originImageSize)
         self.draw(in: CGRectMake(0, 0, originImageSize.width, originImageSize.height))
 
-        switch watermark.type {
+        switch config.type {
         case let .text(text, font, textColor, bgColor):
             let textAttributes = [NSAttributedString.Key.foregroundColor: textColor,
                                   NSAttributedString.Key.font: font,
                                   NSAttributedString.Key.backgroundColor: bgColor]
             let textSize = NSString(string: text).size(withAttributes: textAttributes)
-            if let origin = watermark.origin {
+            if let origin = config.origin {
                 NSString(string: text).draw(in: CGRect(origin: origin, size: textSize), withAttributes: textAttributes)
             } else {
-                let frame = watermark.location.rect(imageSize: originImageSize, decoratorSize: textSize, offset: watermark.offset)
+                let frame = config.location.rect(imageSize: originImageSize, decoratorSize: textSize, offset: config.offset)
                 NSString(string: text).draw(in: frame, withAttributes: textAttributes)
             }
             
         case let .attributeText(text: text):
             let textSize = text.size()
-            if let origin = watermark.origin {
+            if let origin = config.origin {
                 text.draw(in: CGRect(origin: origin, size: textSize))
             } else {
-                let frame = watermark.location.rect(imageSize: originImageSize, decoratorSize: textSize, offset: watermark.offset)
+                let frame = config.location.rect(imageSize: originImageSize, decoratorSize: textSize, offset: config.offset)
                 text.draw(in: frame)
             }
             
         case let .image(image, width):
             let img = image.resize(width: width)
-            if let origin = watermark.origin {
+            if let origin = config.origin {
                 image.draw(in: CGRect(origin: origin, size: img.size))
             } else {
-                let frame = watermark.location.rect(imageSize: originImageSize, decoratorSize: img.size, offset: watermark.offset)
+                let frame = config.location.rect(imageSize: originImageSize, decoratorSize: img.size, offset: config.offset)
                 image.draw(in: frame)
             }
         }

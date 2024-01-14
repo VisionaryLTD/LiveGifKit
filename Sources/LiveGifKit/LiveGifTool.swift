@@ -24,7 +24,7 @@ public class LiveGifTool: GifTool {
     ///
     /// - parameter: GifToolParameter
     /// - gifFPS: gif帧率 默认 30
-    /// - watermarkInfo: 水印信息 默认为空
+    /// - decoratorInfo: 水印信息 默认为空
     /// - data: livePhoto、images 两种方式
     /// - maxResolution: 图片大小 默认300
     public func createGif(parameter: GifToolParameter) async throws -> GifResult {

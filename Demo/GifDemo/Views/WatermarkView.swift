@@ -18,7 +18,7 @@ struct WatermarkView: View {
                     self.vm.showWatermarkLocation.toggle()
                 }
                 .contextMenu {
-                    ForEach(WatermarkLocation.allCases, id: \.self) { location in
+                    ForEach(DecoratorLocation.allCases, id: \.self) { location in
                         Button(location.title) {
                             self.vm.watermarkLocation = location
                         }

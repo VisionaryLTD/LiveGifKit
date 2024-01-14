@@ -56,8 +56,8 @@ struct ImageGifHander {
             try Task.checkCancellation()
             autoreleasepool {
                 var uiImage = UIImage(cgImage: cgImage)
-                if let watermark = config.watermark {
-                    uiImage = uiImage.watermark(watermark: watermark)
+                if let decorator = config.imageDecorate {
+                    uiImage = uiImage.decorate(config: decorator)
                 }
                 uiImages.append(uiImage)
                 CGImageDestinationAddImage(destination, uiImage.cgImage!, frameProperties as CFDictionary)
