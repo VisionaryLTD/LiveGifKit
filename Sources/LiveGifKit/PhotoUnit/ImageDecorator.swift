@@ -14,8 +14,8 @@ import UIKit
 /// textColor: 文字颜色
 /// bgColor: 文字背景色
 /// location: WatermarkLocation 位置，可选值: topLeft、topRight、bottomLeft、bottomRight、center
-public struct WatermarkConfig {
-    public var location: WatermarkLocation
+public struct ImageDecorateConfig {
+    public var location: DecoratorLocation
     public var offset: CGPoint
     public let type: WatermarkType
     public var origin: CGPoint?
@@ -25,7 +25,7 @@ public struct WatermarkConfig {
         case image(image: UIImage, width: CGFloat = 60)
     }
     
-    public init(type: WatermarkType, location: WatermarkLocation = .center, offset: CGPoint = .init(x: 8, y: 8)) {
+    public init(type: WatermarkType, location: DecoratorLocation = .center, offset: CGPoint = .init(x: 8, y: 8)) {
         self.type = type
         self.location = location
         self.offset = offset
@@ -33,7 +33,7 @@ public struct WatermarkConfig {
 }
 
 public extension UIImage {
-    func watermark(watermark: WatermarkConfig) -> UIImage {
+    func watermark(watermark: ImageDecorateConfig) -> UIImage {
         let originImageSize = self.size
         UIGraphicsBeginImageContext(originImageSize)
         self.draw(in: CGRectMake(0, 0, originImageSize.width, originImageSize.height))
@@ -47,7 +47,7 @@ public extension UIImage {
             if let origin = watermark.origin {
                 NSString(string: text).draw(in: CGRect(origin: origin, size: textSize), withAttributes: textAttributes)
             } else {
-                let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: textSize, offset: watermark.offset)
+                let frame = watermark.location.rect(imageSize: originImageSize, decoratorSize: textSize, offset: watermark.offset)
                 NSString(string: text).draw(in: frame, withAttributes: textAttributes)
             }
             
@@ -56,7 +56,7 @@ public extension UIImage {
             if let origin = watermark.origin {
                 text.draw(in: CGRect(origin: origin, size: textSize))
             } else {
-                let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: textSize, offset: watermark.offset)
+                let frame = watermark.location.rect(imageSize: originImageSize, decoratorSize: textSize, offset: watermark.offset)
                 text.draw(in: frame)
             }
             
@@ -65,7 +65,7 @@ public extension UIImage {
             if let origin = watermark.origin {
                 image.draw(in: CGRect(origin: origin, size: img.size))
             } else {
-                let frame = watermark.location.rect(imageSize: originImageSize, watermarkSize: img.size, offset: watermark.offset)
+                let frame = watermark.location.rect(imageSize: originImageSize, decoratorSize: img.size, offset: watermark.offset)
                 image.draw(in: frame)
             }
         }
@@ -76,25 +76,25 @@ public extension UIImage {
     }
 }
 
-public enum WatermarkLocation: String, CaseIterable {
+public enum DecoratorLocation: String, CaseIterable {
     case topLeft
     case topRight
     case bottomLeft
     case bottomRight
     case center
     
-    func rect(imageSize: CGSize, watermarkSize: CGSize, offset: CGPoint) -> CGRect {
+    func rect(imageSize: CGSize, decoratorSize: CGSize, offset: CGPoint) -> CGRect {
         switch self {
         case .topLeft:
-            return CGRect(origin: offset, size: watermarkSize)
+            return CGRect(origin: offset, size: decoratorSize)
         case .topRight:
-            return CGRect(origin: CGPoint(x: imageSize.width - watermarkSize.width - offset.x, y: offset.y), size: watermarkSize)
+            return CGRect(origin: CGPoint(x: imageSize.width - decoratorSize.width - offset.x, y: offset.y), size: decoratorSize)
         case .bottomLeft:
-            return CGRect(origin: CGPoint(x: offset.x, y: imageSize.height - watermarkSize.height - offset.y), size: watermarkSize)
+            return CGRect(origin: CGPoint(x: offset.x, y: imageSize.height - decoratorSize.height - offset.y), size: decoratorSize)
         case .bottomRight:
-            return CGRect(origin: CGPoint(x: imageSize.width - watermarkSize.width - offset.x, y: imageSize.height - watermarkSize.height - offset.y), size: watermarkSize)
+            return CGRect(origin: CGPoint(x: imageSize.width - decoratorSize.width - offset.x, y: imageSize.height - decoratorSize.height - offset.y), size: decoratorSize)
         case .center:
-            return CGRect(origin: CGPoint(x: imageSize.width / 2 - watermarkSize.width / 2, y: imageSize.height / 2 - watermarkSize.height / 2), size: watermarkSize)
+            return CGRect(origin: CGPoint(x: imageSize.width / 2 - decoratorSize.width / 2, y: imageSize.height / 2 - decoratorSize.height / 2), size: decoratorSize)
         }
     }
     
