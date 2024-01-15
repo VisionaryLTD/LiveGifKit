@@ -126,7 +126,7 @@ struct VideoGifHander {
             try Task.checkCancellation()
             autoreleasepool {
                 var uiImage = UIImage(cgImage: cgImage)
-                if let decorator = config.imageDecorate {
+                for decorator in config.imageDecorates {
                     uiImage = uiImage.decorate(config: decorator)
                 }
                 uiImages.append(uiImage)

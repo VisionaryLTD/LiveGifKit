@@ -85,7 +85,6 @@ public class LiveGifTool: GifTool {
     public init() {
         self.gifTempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "Gif/" + UUID().uuidString)
-        
     }
     
     /// 预热

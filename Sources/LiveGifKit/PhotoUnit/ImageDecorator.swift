@@ -35,9 +35,12 @@ public struct ImageDecorateConfig {
 public extension UIImage {
     func decorate(config: ImageDecorateConfig) -> UIImage {
         let originImageSize = self.size
-        UIGraphicsBeginImageContext(originImageSize)
+        UIGraphicsBeginImageContextWithOptions(originImageSize, false, 2.0)
         self.draw(in: CGRectMake(0, 0, originImageSize.width, originImageSize.height))
-
+        
+        let maxCount = maxChineseCharacterCount(forFont: .systemFont(ofSize: 24), inImageWidth: originImageSize.width)
+        print("最大个数: \(maxCount)")
+        
         switch config.type {
         case let .text(text, font, textColor, bgColor):
             let textAttributes = [NSAttributedString.Key.foregroundColor: textColor,
@@ -53,6 +56,7 @@ public extension UIImage {
             
         case let .attributeText(text: text):
             let textSize = text.size()
+            
             if let origin = config.origin {
                 text.draw(in: CGRect(origin: origin, size: textSize))
             } else {
@@ -74,8 +78,20 @@ public extension UIImage {
         UIGraphicsEndImageContext()
         return newImage
     }
+    
+    func maxChineseCharacterCount(forFont font: UIFont, inImageWidth imageWidth: CGFloat) -> Int {
+        let text = "我爱中文"
+        let attributes = [NSAttributedString.Key.font: font]
+        let size = CGSize(width: imageWidth, height: CGFloat.greatestFiniteMagnitude)
+        let options: NSStringDrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
+        let boundingRect = (text as NSString).boundingRect(with: size, options: options, attributes: attributes, context: nil)
+        let characterCount = text.count
+        let characterWidth = boundingRect.width / CGFloat(characterCount)
+        let maxCharactersPerLine = Int(imageWidth / characterWidth)
+        return maxCharactersPerLine
+    }
 }
-
+ 
 public enum DecoratorLocation: String, CaseIterable {
     case topLeft
     case topRight
@@ -94,7 +110,7 @@ public enum DecoratorLocation: String, CaseIterable {
         case .bottomRight:
             return CGRect(origin: CGPoint(x: imageSize.width - decoratorSize.width - offset.x, y: imageSize.height - decoratorSize.height - offset.y), size: decoratorSize)
         case .center:
-            return CGRect(origin: CGPoint(x: imageSize.width / 2 - decoratorSize.width / 2, y: imageSize.height / 2 - decoratorSize.height / 2), size: decoratorSize)
+            return CGRect(origin: CGPoint(x: imageSize.width / 2 - decoratorSize.width / 2 + offset.x, y: imageSize.height / 2 - decoratorSize.height / 2 + offset.y), size: decoratorSize)
         }
     }
     

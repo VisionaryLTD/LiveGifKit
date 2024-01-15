@@ -19,7 +19,7 @@ import Photos
 public struct GifToolParameter {
     var data: DataSource
     var gifFPS: CGFloat
-    var imageDecorate: ImageDecorateConfig?
+    var imageDecorates: [ImageDecorateConfig]
     var maxResolution: CGFloat
     var removeBg: Bool
     
@@ -28,9 +28,9 @@ public struct GifToolParameter {
         case images(frames: [UIImage], adjustOrientation: Bool = false)
     }
     
-    public init(data: DataSource, gifFPS: CGFloat = 30, imageDecorate: ImageDecorateConfig? = nil, maxResolution: CGFloat = 500, removeBg: Bool = false) {
+    public init(data: DataSource, gifFPS: CGFloat = 30, imageDecorates: [ImageDecorateConfig] = [], maxResolution: CGFloat = 500, removeBg: Bool = false) {
         self.gifFPS = gifFPS
-        self.imageDecorate = imageDecorate
+        self.imageDecorates = imageDecorates
         self.data = data
         self.maxResolution = maxResolution
         self.removeBg = removeBg

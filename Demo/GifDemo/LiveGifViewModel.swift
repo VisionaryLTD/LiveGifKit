@@ -88,7 +88,7 @@ class LiveGifViewModel: ObservableObject {
     
     func requestLivePhoto() {
         guard let livePhoto = livePhoto else { return }
-        let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, imageDecorate: getWaterConfig(), removeBg: self.removeBg)
+        let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, imageDecorates: getImageDecorates(), removeBg: self.removeBg)
     
         let task = Task {
             do {
@@ -110,7 +110,7 @@ class LiveGifViewModel: ObservableObject {
         self.gifTool = nil
         self.gifTool = LiveGifTool()
       
-        let parameter = GifToolParameter(data: .images(frames: getRequestImages(), adjustOrientation: self.isShowStaticImage == true), gifFPS: self.giffps, imageDecorate: getWaterConfig(), removeBg: self.removeBg)
+        let parameter = GifToolParameter(data: .images(frames: getRequestImages(), adjustOrientation: self.isShowStaticImage == true), gifFPS: self.giffps, imageDecorates: getImageDecorates(), removeBg: self.removeBg)
 
         let task = Task {
             do {
@@ -125,22 +125,30 @@ class LiveGifViewModel: ObservableObject {
         self.task = task
     }
     
-    func getWaterConfig() -> ImageDecorateConfig? {
-        var waterConfig: ImageDecorateConfig? = nil
-        if !imageWatermark, self.watermarkText.count > 0 {
-//            waterConfig = WatermarkConfig(type: .text(text: self.watermarkText, textColor: UIColor(self.selectedColor)), location: self.watermarkLocation)
-            let text = "Hello, World!"
-            let attributedString = NSAttributedString(string: text, attributes: [
-                .font: UIFont.systemFont(ofSize: 24),
-                .foregroundColor: UIColor.red,
-                .paragraphStyle: NSParagraphStyle.default
-            ])
-            waterConfig = ImageDecorateConfig(type: .attributeText(text: attributedString))
-            waterConfig?.origin = .init(x: 30, y: 40)
-        } else if imageWatermark, let img = UIImage(named: "test") {
-            waterConfig = ImageDecorateConfig(type: .image(image: img, width: 100), location: self.watermarkLocation)
+    func getImageDecorates() -> [ImageDecorateConfig] {
+        var array = [ImageDecorateConfig]()
+        
+        let text = "啊发手机阿萨德杰卡斯登记卡飞机啊飞机卡手\n打飞机"
+        let attributedString = NSAttributedString(string: text, attributes: [
+            .font: UIFont.systemFont(ofSize: 24),
+            .foregroundColor: UIColor.red,
+            .paragraphStyle: NSParagraphStyle.default
+        ])
+       let waterConfig1 = ImageDecorateConfig(type: .attributeText(text: attributedString), location: .center, offset: .init(x: -30, y: -30))
+        let waterConfig2 = ImageDecorateConfig(type: .attributeText(text: attributedString), location: .topLeft)
+        array.append(waterConfig1)
+        array.append(waterConfig2)
+         
+        
+        if let img = UIImage(named: "test") {
+            let waterConfig2 = ImageDecorateConfig(type: .image(image: img, width: 100), location: .center, offset: .init(x: -20, y: 40))
+            array.append(waterConfig2)
+            
+            let waterConfig3 = ImageDecorateConfig(type: .image(image: img, width: 100), location: .center)
+            array.append(waterConfig3)
         }
-        return waterConfig
+        
+        return array
     }
     
     func getRequestImages() -> [UIImage] {
