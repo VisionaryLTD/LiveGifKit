@@ -35,11 +35,9 @@ public struct ImageDecorateConfig {
 public extension UIImage {
     func decorate(config: ImageDecorateConfig) -> UIImage {
         let originImageSize = self.size
-        UIGraphicsBeginImageContextWithOptions(originImageSize, false, 2.0)
-        self.draw(in: CGRectMake(0, 0, originImageSize.width, originImageSize.height))
         
-        let maxCount = maxChineseCharacterCount(forFont: .systemFont(ofSize: 24), inImageWidth: originImageSize.width)
-        print("最大个数: \(maxCount)")
+        UIGraphicsBeginImageContext(originImageSize)
+        self.draw(in: CGRectMake(0, 0, originImageSize.width, originImageSize.height))
         
         switch config.type {
         case let .text(text, font, textColor, bgColor):
