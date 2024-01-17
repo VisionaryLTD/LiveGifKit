@@ -113,6 +113,16 @@ struct VideoGifHander {
             kCGImagePropertyGIFDictionary as String: [kCGImagePropertyGIFUnclampedDelayTime: 1.0/config.gifFPS],
         ]
         
+        var originFrames: [UIImage] = []
+        if config.isReturnOriginFrames {
+            for cgImage in cgImages {
+                try Task.checkCancellation()
+                autoreleasepool {
+                    var uiImage = UIImage(cgImage: cgImage)
+                    originFrames.append(uiImage)
+                }
+            }
+        }
         /// 移除图片背景
         if config.removeBg {
             cgImages = try await LiveGifTool.removeBg(images: cgImages)
@@ -122,6 +132,7 @@ struct VideoGifHander {
         }
 
         var uiImages: [UIImage] = []
+        
         for cgImage in cgImages {
             try Task.checkCancellation()
             autoreleasepool {
@@ -141,7 +152,7 @@ struct VideoGifHander {
         guard didCreateGIF else {
             throw GifError.unknown
         }
-        return GifResult.init(url: gifUrl, frames: uiImages)
+        return GifResult.init(url: gifUrl, frames: uiImages, originFrames: originFrames)
     }
 
     private static func cgImageFromSampleBuffer(_ buffer: CMSampleBuffer) -> CGImage? {

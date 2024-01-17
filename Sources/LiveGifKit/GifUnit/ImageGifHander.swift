@@ -43,7 +43,6 @@ struct ImageGifHander {
             kCGImagePropertyOrientation as String: LiveGifTool.getCGImageOrientation(imageOrientation: newUIImages.first?.imageOrientation ?? .up).rawValue
         ]
         
-     
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
         var cgImages = newUIImages.map({ $0.cgImage! })
         if config.removeBg {

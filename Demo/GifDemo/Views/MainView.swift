@@ -23,6 +23,11 @@ struct MainView: View {
                     Toggle("相册实况/静态图", isOn: $vm.isLivePhoto)
                     Toggle("输出静图", isOn: $vm.isShowStaticImage)
                     Toggle("图片水印", isOn: $vm.imageWatermark)
+                    Button(action: {
+                        self.vm.randomFrameTest()
+                    }, label: {
+                        Text("随机帧测试")
+                    })
                 }
             }
             HStack {
@@ -61,7 +66,7 @@ struct MainView: View {
                             self.vm.showFramesUI.toggle()
                         }
                         .sheet(isPresented: $vm.showFramesUI) {
-                            ImageListView(uiImages: self.vm.gifResult?.frames ?? [])
+                            ImageListView(uiImages: self.vm.gifResult?.originFrames ?? [])
                         }
                     }
                     .frame(minWidth: 150)

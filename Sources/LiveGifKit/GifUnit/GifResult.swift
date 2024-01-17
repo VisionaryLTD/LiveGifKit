@@ -13,6 +13,7 @@ import Photos
 public struct GifResult {
     public let url: URL
     public let frames: [UIImage]
+    public var originFrames: [UIImage] = []
     public var data: Data? {
         return try? Data(contentsOf: url)
     }

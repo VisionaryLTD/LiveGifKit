@@ -31,6 +31,7 @@ class LiveGifViewModel: ObservableObject {
         }
     }
     @Published var imageWatermark = false
+    
     @Published var saveStatus = ""
     
     /// 水印功能
@@ -107,8 +108,6 @@ class LiveGifViewModel: ObservableObject {
         if self.getRequestImages().count == 0 {
             return
         }
-        self.gifTool = nil
-        self.gifTool = LiveGifTool()
       
         let parameter = GifToolParameter(data: .images(frames: getRequestImages(), adjustOrientation: self.isShowStaticImage == true), gifFPS: self.giffps, imageDecorates: getImageDecorates(), removeBg: self.removeBg)
 
@@ -157,6 +156,13 @@ class LiveGifViewModel: ObservableObject {
             return [photoImage]
         }
         return self.gifResult?.frames ?? []
+    }
+    
+    func randomFrameTest() {
+        self.gifTool = nil
+        self.gifTool = LiveGifTool()
+        cancelTask()
+        self.requestImages()
     }
     
     func savePhoto() {

@@ -33,12 +33,14 @@ public class LiveGifTool: GifTool {
         self.parameter.gifTempDir = self.gifTempDir
         switch parameter.data {
         case .livePhoto(let livePhoto, let livePhotoFPS):
+            print("！！！livephoto转GIF---------------------")
             var result = try await self.createLivePhotoGif(livePhoto: livePhoto, livePhotoFPS: livePhotoFPS)
 #if DEBUG
             result.totalTime = CFAbsoluteTimeGetCurrent() - startTime
 #endif
             return result
         case .images(let frames, _):
+            print("！！！图片转GIF---------------------")
             var result =  try await self.createImagesGif(images: frames)
 #if DEBUG
             result.totalTime = CFAbsoluteTimeGetCurrent() - startTime
