@@ -66,26 +66,29 @@ extension CGImage {
         if !isTrue {
             return self
         }
-        return await Task.detached {
-            self.removeBackgroundImpl()
-        }.value
+        
+        let processor = ImageBackgroundRemovalProcessor(inputImage: self)
+        return try! await processor.process()!
     }
     
-    private func removeBackgroundImpl() -> CGImage {
-        let ciImage = CIImage(cgImage: self)
-        guard let mask = subjectMask(ciImage: ciImage) else {
-            return self
-        }
-        // Acquire the selected background image.
-        let backgroundImage = CIImage(color: CIColor.clear).cropped(to: ciImage.extent)
-        let filter = CIFilter.blendWithMask()
-        filter.inputImage = ciImage
-        filter.backgroundImage = backgroundImage
-        filter.maskImage = mask
-        let image = filter.outputImage!
-        let resultImage = render(ciImage: image)
-        return resultImage
-    }
+//    private func removeBackgroundImpl() -> CGImage {
+//        let ciImage = CIImage(cgImage: self)
+//        guard let mask = subjectMask(ciImage: ciImage) else {
+//            return self
+//        }
+//        // Acquire the selected background image.
+//        let backgroundImage = CIImage(color: CIColor.clear).cropped(to: ciImage.extent)
+//        let filter = CIFilter.blendWithMask()
+//        filter.inputImage = ciImage
+//        filter.backgroundImage = backgroundImage
+//        filter.maskImage = mask
+//        let image = filter.outputImage!
+//        let resultImage = render(ciImage: image)
+//        return resultImage
+        
+//        let processor = ImageBackgroundRemovalProcessor(inputImage: self)
+//        return try! awa
+//    }
 }
 
 private func render(ciImage img: CIImage) -> CGImage {
