@@ -5,22 +5,26 @@
 //  Created by Kai Shao on 2024/2/16.
 //
 
-import Vision
+@preconcurrency import Vision
 import UIKit
 
-class ImageBackgroundRemovalProcessor {
+struct ImageBackgroundRemovalProcessor {
     var inputImage: CGImage
     
-    init(inputImage: CGImage) {
-        self.inputImage = inputImage
+    enum Error: LocalizedError {
+        case makeMaskFailed
     }
     
     func process() async throws -> CGImage? {
-        guard let mask = try await makeMask() else {
-            assertionFailure()
-            return nil
+        let maskBuffer: CVPixelBuffer
+        
+        if #available(iOS 18.0, *) {
+            maskBuffer = try await makeMask_18()
+        } else {
+            maskBuffer = try await makeMask()
         }
         
+        let mask = CIImage(cvPixelBuffer: maskBuffer)
         let ciImage = CIImage(cgImage: inputImage)
         // Acquire the selected background image.
         let backgroundImage = CIImage(color: CIColor.clear).cropped(to: ciImage.extent)
@@ -38,54 +42,50 @@ class ImageBackgroundRemovalProcessor {
         return cgImage
     }
     
-    private func makeMask() async throws -> CIImage? {
-        guard let model = try? VNCoreMLModel(for: DeepLabV3(configuration: .init()).model) else {
-            return nil
-        }
+    private func makeMask() async throws -> CVPixelBuffer {
+        let ciImage = CIImage(cgImage: inputImage)
+        let handler = VNImageRequestHandler(ciImage: ciImage)
         
         return try await withCheckedThrowingContinuation { continuation in
-            let request = VNCoreMLRequest(model: model) { request, error in
-                if let error {
-                    continuation.resume(throwing: error)
+            let request = VNGenerateForegroundInstanceMaskRequest { request, error in
+                guard let result = request.results?.first as? VNInstanceMaskObservation else {
+                    continuation.resume(throwing: Error.makeMaskFailed)
                     return
                 }
-                
-                guard let observations = request.results as? [VNCoreMLFeatureValueObservation],
-                      let segmentationmap = observations.first?.featureValue.multiArrayValue else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                
-                let segmentationMask = segmentationmap.image(min: 0, max: 1)
-
-                continuation.resume(returning: segmentationMask)
-            }
-            
-            request.imageCropAndScaleOption = .scaleFill
-            
-            DispatchQueue.global().async {
-                let handler = VNImageRequestHandler(cgImage: self.inputImage, options: [:])
                 
                 do {
-                    try handler.perform([request])
+                    let mask = try result.generateScaledMaskForImage(
+                        forInstances: result.allInstances,
+                        from: handler
+                    )
+                    
+                    continuation.resume(returning: mask)
                 } catch {
-                    print(error)
+                    continuation.resume(throwing: error)
                 }
+            }
+            
+            do {
+                try handler.perform([request])
+            } catch {
+                continuation.resume(throwing: error)
             }
         }
     }
     
-    private func makeMask2() async throws -> CIImage? {
-        let request = VNGenerateForegroundInstanceMaskRequest()
-        let ciImage = CIImage(cgImage: inputImage)
-        let handler = VNImageRequestHandler(ciImage: ciImage)
+    @available(iOS 18.0, macOS 15.0, *)
+    private func makeMask_18() async throws -> CVPixelBuffer {
+        let request = GenerateForegroundInstanceMaskRequest()
         
-        try handler.perform([request])
-
-        guard let result = request.results?.first else { return nil }
- 
-        let mask = try result.generateScaledMaskForImage(forInstances: result.allInstances, from: handler)
+        guard let result = try await request.perform(on: inputImage) else {
+            throw Error.makeMaskFailed
+        }
         
-        return CIImage(cvPixelBuffer: mask)
+        let mask = try result.generateScaledMask(
+            for: result.allInstances,
+            scaledToImageFrom: .init(inputImage)
+        )
+        
+        return mask
     }
 }

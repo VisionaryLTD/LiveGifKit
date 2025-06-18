@@ -62,13 +62,18 @@ public extension UIImage {
 }
 
 extension CGImage {
-    func removeBackground(_ isTrue: Bool = true) async -> CGImage {
+    func removeBackground(_ isTrue: Bool = true) async -> CGImage? {
         if !isTrue {
             return self
         }
         
         let processor = ImageBackgroundRemovalProcessor(inputImage: self)
-        return try! await processor.process()!
+        
+        do {
+            return try await processor.process()
+        } catch {
+            return nil
+        }
     }
     
 //    private func removeBackgroundImpl() -> CGImage {
@@ -98,27 +103,27 @@ private func render(ciImage img: CIImage) -> CGImage {
     return cgImage
 }
 
-private extension CGImage {
-    func subjectMask(ciImage: CIImage) -> CIImage? {
-        let request = VNGenerateForegroundInstanceMaskRequest()
-        let handler = VNImageRequestHandler(ciImage: ciImage)
-        do {
-            try handler.perform([request])
-        } catch {
-            print("Failed to perform Vision request.")
-            return nil
-        }
-
-        guard let result = request.results?.first else { return nil }
- 
-        do {
-            let mask = try result.generateScaledMaskForImage(forInstances: result.allInstances, from: handler)
-            return CIImage(cvPixelBuffer: mask)
-        } catch {
-            return nil
-        }
-    }
-}
+//private extension CGImage {
+//    func subjectMask(ciImage: CIImage) -> CIImage? {
+//        let request = VNGenerateForegroundInstanceMaskRequest()
+//        let handler = VNImageRequestHandler(ciImage: ciImage)
+//        do {
+//            try handler.perform([request])
+//        } catch {
+//            print("Failed to perform Vision request.")
+//            return nil
+//        }
+//
+//        guard let result = request.results?.first else { return nil }
+// 
+//        do {
+//            let mask = try result.generateScaledMaskForImage(forInstances: result.allInstances, from: handler)
+//            return CIImage(cvPixelBuffer: mask)
+//        } catch {
+//            return nil
+//        }
+//    }
+//}
  
 extension CGImage {
     func nonTransparentBoundingBox() -> CGRect? {

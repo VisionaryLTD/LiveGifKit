@@ -75,9 +75,9 @@ extension LiveGifTool {
     /// 批量移除背景
     public static func removeBg(images: [CGImage]) async throws -> [CGImage] {
         let tasks = images.map { image in
-            Task { () -> (CGImage, CGRect?) in
+            Task { () -> (CGImage?, CGRect?) in
                 let cgImg = await image.removeBackground()
-                let rect = cgImg.nonTransparentBoundingBox()
+                let rect = cgImg?.nonTransparentBoundingBox()
                 return (cgImg, rect)
             }
         }
@@ -94,7 +94,10 @@ extension LiveGifTool {
                     } else {
                         finalRect = rect
                     }
-                    newImages.append(cgImg)
+                    
+                    if let cgImg {
+                        newImages.append(cgImg)
+                    }
                 }
             }
             if let finalRect = finalRect {
