@@ -6,7 +6,7 @@
 //
 
 @preconcurrency import Vision
-import UIKit
+import CoreImage.CIFilterBuiltins
 
 struct ImageBackgroundRemovalProcessor {
     var inputImage: CGImage
@@ -37,6 +37,43 @@ struct ImageBackgroundRemovalProcessor {
         guard let cgImage = CIContext(options: nil).createCGImage(image, from: image.extent) else {
             assertionFailure()
             return nil
+        }
+        
+        return cgImage
+    }
+    
+    func processWithBorder(borderWidth: CGFloat = 5, borderColor: CIColor = .white) async throws -> CGImage? {
+        // First process the image to remove background
+        guard let processedImage = try await process() else {
+            return nil
+        }
+        
+        // Convert to CIImage for border processing
+        let ciImage = CIImage(cgImage: processedImage)
+        
+        // Apply morphology maximum to "erode" image in all directions into transparent area
+        let filter = CIFilter.morphologyMaximum()
+        filter.inputImage = ciImage
+        filter.radius = Float(borderWidth)
+        guard let eroded = filter.outputImage else {
+            return processedImage
+        }
+        
+        // Turn all pixels of eroded image into desired border color
+        let colorForeground = CIImage(color: borderColor)
+        guard let colorized = CIBlendKernel.sourceAtop.apply(
+            foreground: colorForeground,
+            background: eroded
+        )?.cropped(to: eroded.extent) else {
+            return processedImage
+        }
+        
+        // Blend original image over eroded, colorized image
+        let imageWithBorder = ciImage.composited(over: colorized)
+        
+        // Convert back to CGImage
+        guard let cgImage = CIContext(options: nil).createCGImage(imageWithBorder, from: imageWithBorder.extent) else {
+            return processedImage
         }
         
         return cgImage

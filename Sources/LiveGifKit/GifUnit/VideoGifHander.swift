@@ -118,7 +118,7 @@ struct VideoGifHander {
             for cgImage in cgImages {
                 try Task.checkCancellation()
                 autoreleasepool {
-                    var uiImage = UIImage(cgImage: cgImage)
+                    let uiImage = UIImage(cgImage: cgImage)
                     originFrames.append(uiImage)
                 }
             }
