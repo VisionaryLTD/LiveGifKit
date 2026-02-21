@@ -87,6 +87,71 @@ struct GIFToolKitImplTests {
         #expect(removerSnapshot.calls == 0)
     }
 
+    @Test("GIFWatermark image bridge exports image file URL")
+    @MainActor
+    func watermarkImageBridgeExportsURL() throws {
+        let image = makeGIFImage(width: 40, height: 40, alpha: 255)
+        let content = try GIFWatermark.Content.image(image, width: 48)
+
+        switch content {
+        case let .imageFile(url, width):
+            #expect(width == 48)
+            #expect(FileManager.default.fileExists(atPath: url.path))
+            try? FileManager.default.removeItem(at: url)
+        default:
+            Issue.record("Expected imageFile watermark content")
+        }
+    }
+
+    @Test("GIFWatermark image bridge throws for invalid image")
+    @MainActor
+    func watermarkImageBridgeThrowsForInvalidImage() async {
+        #expect(throws: GIFError.self) {
+            _ = try GIFWatermark.Content.image(makeInvalidGIFImage())
+        }
+    }
+
+    @Test("Request cleanup removes managed watermark temporary files")
+    @MainActor
+    func requestCleanupRemovesManagedWatermarkFiles() async throws {
+        let storage = TemporaryStorageStub()
+        let encoding = EncodingStub()
+        let extractor = VideoFrameExtractorStub()
+        let backgroundRemover = BackgroundRemoverStub()
+        let photoLibrary = PhotoLibraryStub()
+        let recommendations = RecommendationProviderStub()
+        let sourceImage = makeGIFImage(width: 32, height: 32, alpha: 255)
+        let watermarkImage = makeGIFImage(width: 16, height: 16, alpha: 255)
+        let content = try GIFWatermark.Content.image(watermarkImage, width: 12)
+        guard case let .imageFile(url, _) = content else {
+            Issue.record("Expected managed watermark URL")
+            return
+        }
+        encoding.outputFrames = [sourceImage]
+
+        let toolKit = GIFToolKitImpl(
+            encoding: encoding,
+            videoFrameExtractor: extractor,
+            backgroundRemover: backgroundRemover,
+            photoLibrary: photoLibrary,
+            storage: storage,
+            recommendationProvider: recommendations
+        )
+        _ = try await toolKit.generateGIF(
+            .init(
+                source: .images([sourceImage]),
+                options: GIFGenerationOptions(
+                    outputFPS: 20,
+                    watermarks: [GIFWatermark(content: content)]
+                )
+            )
+        )
+        #expect(FileManager.default.fileExists(atPath: url.path))
+
+        try await toolKit.cleanup(.requestOnly)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test("Generate GIF spills frames to temporary files when over memory budget")
     func generateSpillsFramesWhenBudgetExceeded() async throws {
         let storage = TemporaryStorageStub()
@@ -351,6 +416,14 @@ struct GIFToolKitImplTests {
 
     private func makeGIFImage(width: Int, height: Int, alpha: UInt8) -> GIFImage {
         GIFImage.gifImage(cgImage: makeCGImage(width: width, height: height, alpha: alpha))
+    }
+
+    private func makeInvalidGIFImage() -> GIFImage {
+        #if canImport(UIKit)
+        GIFImage()
+        #else
+        GIFImage(size: .zero)
+        #endif
     }
 
     private func makeCGImage(width: Int, height: Int, alpha: UInt8) -> CGImage {

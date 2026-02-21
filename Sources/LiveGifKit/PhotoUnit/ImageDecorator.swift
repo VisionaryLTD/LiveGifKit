@@ -97,7 +97,10 @@ public extension GIFImage {
             draw(attributed: attributed, watermark: watermark, context: context, imageSize: imageSize)
         case let .attributedText(text):
             draw(attributed: text, watermark: watermark, context: context, imageSize: imageSize)
-        case let .image(image, width):
+        case let .imageFile(url, width):
+            guard let image = GIFImage.gifImage(contentsOf: url) else {
+                return
+            }
             let resized = image.resize(width: width)
             guard let cgImage = resized.gifCGImage else {
                 return
@@ -209,7 +212,11 @@ extension GIFWatermark {
         case let .attributeText(text):
             content = .attributedText(text)
         case let .image(image, width):
-            content = .image(image, width: width)
+            if let imageFile = try? GIFWatermark.Content.makeImageFile(image, width: width) {
+                content = imageFile
+            } else {
+                content = .attributedText(NSAttributedString(string: ""))
+            }
         }
 
         self.init(
@@ -229,8 +236,12 @@ extension ImageDecorateConfig {
             type = .text(text: text, font: font, textColor: textColor, bgColor: backgroundColor)
         case let .attributedText(text):
             type = .attributeText(text: text)
-        case let .image(image, width):
-            type = .image(image: image, width: width)
+        case let .imageFile(url, width):
+            if let image = GIFImage.gifImage(contentsOf: url) {
+                type = .image(image: image, width: width)
+            } else {
+                type = .attributeText(text: NSAttributedString(string: ""))
+            }
         }
 
         self.init(

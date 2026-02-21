@@ -73,7 +73,23 @@ public struct GIFWatermark: @unchecked Sendable {
             backgroundColor: PlatformColor = .clear
         )
         case attributedText(NSAttributedString)
-        case image(GIFImage, width: CGFloat = 60)
+        case imageFile(URL, width: CGFloat = 60)
+
+        @MainActor
+        public static func image(_ image: GIFImage, width: CGFloat = 60) throws -> Self {
+            try makeImageFile(image, width: width)
+        }
+
+        static func makeImageFile(_ image: GIFImage, width: CGFloat) throws -> Self {
+            guard let data = image.gifPNGData else {
+                throw GifError.invalidImageData
+            }
+            let directory = GIFTemporaryPaths.watermarkDirectory
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileURL = directory.appending(path: "\(UUID().uuidString).png")
+            try data.write(to: fileURL, options: .atomic)
+            return .imageFile(fileURL, width: width)
+        }
     }
 
     public var content: Content

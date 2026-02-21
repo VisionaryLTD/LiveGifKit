@@ -31,6 +31,14 @@ extension GIFImage {
         #endif
     }
 
+    static func gifImage(contentsOf url: URL) -> GIFImage? {
+        #if canImport(UIKit)
+        GIFImage(contentsOfFile: url.path)
+        #else
+        GIFImage(contentsOf: url)
+        #endif
+    }
+
     var gifPNGData: Data? {
         #if canImport(UIKit)
         pngData()
@@ -48,4 +56,3 @@ extension GIFImage {
         #endif
     }
 }
-

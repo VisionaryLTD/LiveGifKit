@@ -46,14 +46,24 @@ internal protocol GIFRecommendationProviding: Sendable {
 }
 
 internal actor GIFRequestDirectoryStore {
-    private var directories: [URL] = []
-
-    func track(_ directory: URL) {
-        directories.append(directory)
+    struct RequestResources: Sendable {
+        let directory: URL
+        let managedWatermarkFiles: [URL]
     }
 
-    func popLatest() -> URL? {
-        directories.popLast()
+    private var resources: [RequestResources] = []
+
+    func track(directory: URL, managedWatermarkFiles: [URL]) {
+        resources.append(
+            RequestResources(
+                directory: directory,
+                managedWatermarkFiles: managedWatermarkFiles
+            )
+        )
+    }
+
+    func popLatest() -> RequestResources? {
+        resources.popLast()
     }
 }
 
@@ -112,7 +122,11 @@ internal struct GIFToolKitImpl: GIFToolKit {
     func generateGIF(_ request: GIFGenerationRequest) async throws -> GIFGenerationResult {
         let start = CFAbsoluteTimeGetCurrent()
         let directory = try storage.makeRequestDirectory()
-        await requestDirectoryStore.track(directory)
+        let managedWatermarkFiles = managedWatermarkFiles(from: request.options.watermarks)
+        await requestDirectoryStore.track(
+            directory: directory,
+            managedWatermarkFiles: managedWatermarkFiles
+        )
         let outputURL = directory.appending(path: "\(Int(Date().timeIntervalSince1970)).gif")
 
         let sourceImages = try await sourceImages(from: request, directory: directory)
@@ -186,8 +200,14 @@ internal struct GIFToolKitImpl: GIFToolKit {
     func cleanup(_ scope: GIFCleanupScope) async throws {
         switch scope {
         case .requestOnly:
-            if let directory = await requestDirectoryStore.popLatest() {
-                try storage.cleanup(directory: directory)
+            if let resources = await requestDirectoryStore.popLatest() {
+                try storage.cleanup(directory: resources.directory)
+                for url in resources.managedWatermarkFiles {
+                    guard FileManager.default.fileExists(atPath: url.path) else {
+                        continue
+                    }
+                    try FileManager.default.removeItem(at: url)
+                }
             }
         case .allTemporaryGIFFiles:
             try storage.cleanupAll()
@@ -228,6 +248,17 @@ internal struct GIFToolKitImpl: GIFToolKit {
                 return
             }
             total += cgImage.bytesPerRow * cgImage.height
+        }
+    }
+
+    private func managedWatermarkFiles(from watermarks: [GIFWatermark]) -> [URL] {
+        watermarks.compactMap { watermark in
+            switch watermark.content {
+            case .imageFile(let url, _):
+                return GIFTemporaryPaths.isManagedWatermarkFile(url) ? url : nil
+            default:
+                return nil
+            }
         }
     }
 
@@ -421,7 +452,7 @@ internal struct GIFPhotoLibraryLive: GIFPhotoLibraryPersisting {
 
 internal struct GIFTemporaryStorageLive: GIFTemporaryStorage {
     private var baseDirectory: URL {
-        URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "GIF")
+        GIFTemporaryPaths.baseDirectory
     }
 
     func makeRequestDirectory() throws -> URL {
