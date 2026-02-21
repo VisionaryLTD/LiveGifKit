@@ -1,92 +1,163 @@
-//
-//  ContentView.swift
-//  GifDemo
-//
-//  Created by 汤小军 on 2023/12/10.
-//
-
-import SwiftUI
-import PhotosUI
 import LiveGifKit
-import Photos
+import PhotosUI
 import SDWebImageSwiftUI
+import SwiftUI
 
 struct MainView: View {
-   
-    @EnvironmentObject var vm: LiveGifViewModel
-   
+    @Environment(LiveGIFDemoViewModel.self) private var viewModel
+
     var body: some View {
-        VStack {
-            HStack {
-                VStack {
-                    Toggle("去背景", isOn: $vm.removeBg)
-                    Toggle("相册实况/静态图", isOn: $vm.isLivePhoto)
-                    Toggle("输出静图", isOn: $vm.isShowStaticImage)
-                    Toggle("图片水印", isOn: $vm.imageWatermark)
-                    Button(action: {
-                        self.vm.randomFrameTest()
-                    }, label: {
-                        Text("随机帧测试")
-                    })
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    sourceSection
+                    controlsSection
+                    WatermarkView()
+                    resultSection
+                    OperatorButtonsView()
+                }
+                .padding()
+            }
+            .navigationTitle("LiveGIFKit Demo")
+            .sheet(isPresented: Bindable(viewModel).showFrames) {
+                ImageListView(images: viewModel.generatedResult?.originalFrames ?? [])
+            }
+            .sheet(isPresented: Bindable(viewModel).showRecommendations) {
+                ImageListView(images: viewModel.recommendedImages)
+            }
+        }
+    }
+
+    private var sourceSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PhotosPicker(
+                "Select Source",
+                selection: Bindable(viewModel).pickerItem,
+                matching: viewModel.sourceMode == .livePhoto ? .livePhotos : .images
+            )
+            .buttonStyle(.borderedProminent)
+
+            Picker("Source Type", selection: Bindable(viewModel).sourceMode) {
+                ForEach(LiveGIFDemoViewModel.SourceMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
             }
-            HStack {
-                Text("LP(FPS): \(Int(vm.fps))")
-                Slider(value: $vm.fps, in: 5...60, step: 5) { isEditing in
-                    if !isEditing {
-                        self.vm.requestData()
-                    }
+            .pickerStyle(.segmented)
+        }
+        .onChange(of: viewModel.pickerItem) { _, _ in
+            viewModel.handlePickerChange()
+        }
+    }
+
+    private var controlsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Remove Background", isOn: Bindable(viewModel).removeBackground)
+
+            LabeledContent("Source FPS: \(Int(viewModel.sourceFPS))") {
+                Slider(value: Bindable(viewModel).sourceFPS, in: 5...60, step: 1)
+            }
+
+            LabeledContent("Output GIF FPS: \(Int(viewModel.outputFPS))") {
+                Slider(value: Bindable(viewModel).outputFPS, in: 5...60, step: 1)
+            }
+            Text(viewModel.isGenerating ? "Updating preview…" : "Preview updates automatically")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var resultSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Result")
+                    .font(.headline)
+                if viewModel.isLoadingSource || viewModel.isGenerating || viewModel.isRemovingBackground {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                if viewModel.isLoadingSource {
+                    Text("Loading source…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else if viewModel.isRemovingBackground {
+                    Text("Removing background…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else if viewModel.isGenerating {
+                    Text("Generating GIF…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
-            HStack {
-                Text("GIF(FPS): \(Int(vm.giffps))")
-                Slider(value: $vm.giffps, in: 5...60, step: 5) { isEditing in
-                    if !isEditing {
-                        self.vm.requestData()
-                    }
-                }
-            }
-            
-            WatermarkView()
-            Divider()
-            Spacer()
-            
-            if let data = self.vm.gifResult?.data {
-                HStack {
+
+            if let data = viewModel.generatedResult?.data {
+                previewContainer {
                     AnimatedImage(data: data)
-                        .purgeable(true)
                         .resizable()
-                        .scaledToFit()
-                        .frame(width: 300)
-                    Spacer()
-                    VStack(alignment: .leading) {
-                        Text("总帧数: \(self.vm.gifResult?.frames.count ?? 0)")
-                        Text("总耗时: \(self.vm.gifResult?.totalTime ?? 0)")
-                        Button("查看帧") {
-                            self.vm.showFramesUI.toggle()
-                        }
-                        .sheet(isPresented: $vm.showFramesUI) {
-                            ImageListView(uiImages: self.vm.gifResult?.originFrames ?? [])
-                        }
-                    }
-                    .frame(minWidth: 150)
                 }
+
+                HStack {
+                    Text("Frames: \(viewModel.generatedResult?.frames.count ?? 0)")
+                    Spacer()
+                    Button("View Frames") {
+                        viewModel.showFrames = true
+                    }
+                }
+            } else if let image = viewModel.singleBackgroundRemovedImage {
+                previewContainer {
+                    platformImage(for: image)
+                        .resizable()
+                }
+            } else {
+                Text("Select a source to start auto-generating the GIF preview.")
+                    .foregroundStyle(.secondary)
             }
-           
-            PhotosPicker("选择照片", selection: $vm.photoItem, matching: self.vm.isLivePhoto ? .livePhotos : .images)
-                .photosPickerStyle(.presentation)
-                .photosPickerDisabledCapabilities(.selectionActions)
-                .ignoresSafeArea(edges: .top)
-                
-          
-            /// 操作：删除目录、保存相册、重新生成、智能推荐
-            OperatorButtonsView()
         }
-        .padding()
-        .onChange(of: self.vm.photoItem) {oldValue, newValue in
-            if newValue != nil {
-                self.vm.requestPickerItem()
+
+        if !viewModel.lastErrorMessage.isEmpty {
+            Text(viewModel.lastErrorMessage)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private var previewAspectRatio: CGFloat {
+        guard let frame = viewModel.generatedResult?.frames.first else {
+            guard let image = viewModel.singleBackgroundRemovedImage else {
+                return 1
             }
+            let width = max(image.size.width, 1)
+            let height = max(image.size.height, 1)
+            return width / height
         }
+        let width = max(frame.size.width, 1)
+        let height = max(frame.size.height, 1)
+        return width / height
+    }
+
+    private func platformImage(for image: GIFImage) -> Image {
+        #if canImport(UIKit)
+        Image(uiImage: image)
+        #else
+        Image(nsImage: image)
+        #endif
+    }
+
+    private func previewContainer<Content: View>(@ViewBuilder content: @escaping () -> Content) -> some View {
+        GeometryReader { proxy in
+            let maxPreviewHeight: CGFloat = 320
+            let ratio = previewAspectRatio
+            let previewWidth = min(proxy.size.width, maxPreviewHeight * ratio)
+            let previewHeight = previewWidth / ratio
+
+            content()
+                .frame(width: previewWidth, height: previewHeight)
+                .overlay(
+                    Rectangle()
+                        .stroke(.red, lineWidth: 2)
+                )
+                .position(x: proxy.size.width / 2, y: previewHeight / 2)
+        }
+        .frame(height: 320)
     }
 }

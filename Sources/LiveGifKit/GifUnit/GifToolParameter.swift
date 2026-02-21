@@ -1,13 +1,8 @@
-//
-//  File.swift
-//
-//
-//  Created by 汤小军 on 2024/1/2.
-//
-
 import Foundation
-import UIKit
 import Photos
+#if canImport(PhotosUI)
+import PhotosUI
+#endif
 
 /// 生成Gif的参数Model
 ///
@@ -16,17 +11,22 @@ import Photos
 ///data: DataSource、livePhoto和图片两种方式
 ///maxResolution: 图片大小 默认300
 ///removeImageBgColor: 是否去背景
+@available(*, deprecated, message: "Use GIFGenerationRequest and GIFGenerationOptions.")
 public struct GifToolParameter {
-    var data: DataSource
-    var gifFPS: CGFloat
-    var imageDecorates: [ImageDecorateConfig]
-    var maxResolution: CGFloat
-    var removeBg: Bool
-    var isReturnOriginFrames: Bool
+    public var data: DataSource
+    public var gifFPS: CGFloat
+    public var imageDecorates: [ImageDecorateConfig]
+    public var maxResolution: CGFloat
+    public var removeBg: Bool
+    public var isReturnOriginFrames: Bool
     
+    @available(*, deprecated, message: "Use GIFGenerationSource.")
     public enum DataSource {
+        #if canImport(PhotosUI)
         case livePhoto(livePhoto: PHLivePhoto, livePhotoFPS: CGFloat = 30)
-        case images(frames: [UIImage], adjustOrientation: Bool = false)
+        #endif
+        case images(frames: [GIFImage], adjustOrientation: Bool = false)
+        case video(url: URL, sourceFPS: CGFloat? = nil)
     }
     
     public init(data: DataSource, gifFPS: CGFloat = 30, imageDecorates: [ImageDecorateConfig] = [], maxResolution: CGFloat = 500, removeBg: Bool = false, isReturnOriginFrames: Bool = false) {
@@ -40,9 +40,11 @@ public struct GifToolParameter {
     
     var livePhotoFPS: CGFloat {
         switch self.data {
+        #if canImport(PhotosUI)
         case .livePhoto(_, let livePhotoFPS):
             return livePhotoFPS
-        case .images(_, _):
+        #endif
+        case .images(_, _), .video(_, _):
             return 30
         }
     }

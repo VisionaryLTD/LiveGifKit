@@ -15,6 +15,10 @@ public enum GifError: Error {
     case unableToFindvideoUrl
     case gifResultNil
     case tooManyFrames
+    case invalidImageData
+    case unableToRemoveBackground
+    case unsupportedSource
+    case unimplemented
 }
 
 public enum AlbumToolError: Error {
@@ -25,3 +29,5 @@ public enum AlbumToolError: Error {
     case limited
     case unknown
 }
+
+public typealias GIFError = GifError

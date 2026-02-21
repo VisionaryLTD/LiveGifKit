@@ -1,188 +1,261 @@
-//
-//  LiveGifViewModel.swift
-//  GifDemo
-//
-//  Created by tangxiaojun on 2024/1/5.
-//
-
+import Dependencies
 import Foundation
-import _PhotosUI_SwiftUI
 import LiveGifKit
+import Observation
+import OSLog
+import PhotosUI
 import SwiftUI
 
 @MainActor
-class LiveGifViewModel: ObservableObject {
-    var gifTool: LiveGifTool?  = LiveGifTool()
-    
-    /// 相册Item
-   
-    @Published var photoItem: PhotosPickerItem?
-    @Published var fps: Double = 15
-    @Published var giffps: Double = 30
-    @Published var removeBg = false {
-        didSet {
-            self.requestData()
-        }
-    }
-    @Published var isLivePhoto = false
-    @Published var isShowStaticImage = true {
-        didSet {
-            self.requestData()
-        }
-    }
-    @Published var imageWatermark = false
-    
-    @Published var saveStatus = ""
-    
-    /// 水印功能
-    @Published var watermarkText: String = ""
-    @Published var selectedColor = Color.red
-    @Published var watermarkLocation: DecoratorLocation = .center
-    @Published var showWatermarkLocation = false
-    
-    /// 推荐功能
-    @Published var recommendImages = [UIImage]()
-    @Published var showRecommendUI = false
-    @Published var showFramesUI = false
-    ///
-    var photoImage: UIImage?
-    var livePhoto: PHLivePhoto?
-    @Published var gifResult: GifResult?
-    
-    var task: Task<(), Never>? = nil
-    
-    init() {
-        Task {
-           try? await LiveGifTool().preheating()
-        }
-        
-    }
-    
-    func requestPickerItem() {
-        self.gifTool = nil
-        self.gifTool = LiveGifTool()
-        guard let photoItem = photoItem else { return }
-         
-        let task = Task {
-            if let photoData = try? await photoItem.loadTransferable(type: Data.self) {
-                self.photoImage = UIImage(data: photoData)
-            }
-            if let livePhoto = try? await photoItem.loadTransferable(type: PHLivePhoto.self) {
-                self.livePhoto = livePhoto
-            }
-             
-            self.requestData()
-        }
-        self.task = task
-    }
-    
-    func requestData() {
-        self.gifTool = nil
-        self.gifTool = LiveGifTool()
-        cancelTask()
-        if isShowStaticImage {
-            self.requestImages()
-        } else {
-            self.requestLivePhoto()
-        }
-    }
-    
-    func requestLivePhoto() {
-        guard let livePhoto = livePhoto else { return }
-        let parameter = GifToolParameter(data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: self.fps), gifFPS: self.giffps, imageDecorates: getImageDecorates(), removeBg: self.removeBg)
-    
-        let task = Task {
-            do {
-                self.gifResult = try await self.gifTool?.createGif(parameter: parameter)
-                self.photoItem = nil
-            } catch {
-                print("requestPickerItem: \(error)")
-                self.photoItem = nil
-            }
-        }
-        self.task = task
-    }
-    
+@Observable
+final class LiveGIFDemoViewModel {
+    enum SourceMode: String, CaseIterable, Identifiable {
+        case livePhoto = "Live Photo"
+        case image = "Image"
 
-    func requestImages() {
-        if self.getRequestImages().count == 0 {
+        var id: String { rawValue }
+    }
+
+    @ObservationIgnored @Dependency(\.gifToolKit) private var gifToolKit
+    @ObservationIgnored private var generationTask: Task<GIFGenerationResult, Error>?
+    @ObservationIgnored private var pickerTask: Task<Void, Never>?
+    @ObservationIgnored private var debounceTask: Task<Void, Never>?
+    @ObservationIgnored private var operationTask: Task<Void, Never>?
+    @ObservationIgnored private let logger = Logger(subsystem: "LiveGIFKit.Demo", category: "ViewModel")
+
+    var sourceMode: SourceMode = .livePhoto {
+        didSet { scheduleAutoGenerate() }
+    }
+    var pickerItem: PhotosPickerItem?
+    var sourceImage: GIFImage?
+    var sourceLivePhoto: PHLivePhoto?
+    var generatedResult: GIFGenerationResult?
+    var singleBackgroundRemovedImage: GIFImage?
+    var recommendedImages: [GIFImage] = []
+    var isLoadingSource = false
+    var isRemovingBackground = false
+    var removeBackground = false {
+        didSet { scheduleAutoGenerate() }
+    }
+    var outputFPS = 30.0 {
+        didSet { scheduleAutoGenerate() }
+    }
+    var sourceFPS = 15.0 {
+        didSet { scheduleAutoGenerate() }
+    }
+    var showRecommendations = false
+    var showFrames = false
+    var watermarkText = "" {
+        didSet { scheduleAutoGenerate() }
+    }
+    var watermarkLocation: GIFWatermarkPosition = .center {
+        didSet { scheduleAutoGenerate() }
+    }
+    var saveStatus = ""
+    var isGenerating = false
+    var lastErrorMessage = ""
+
+    func warmUp() {
+        operationTask?.cancel()
+        operationTask = Task {
+            logger.info("Preheat start")
+            try? await gifToolKit.preheat()
+            logger.info("Preheat end")
+        }
+    }
+
+    func handlePickerChange() {
+        guard let pickerItem else {
             return
         }
-      
-        let parameter = GifToolParameter(data: .images(frames: getRequestImages(), adjustOrientation: self.isShowStaticImage == true), gifFPS: self.giffps, imageDecorates: getImageDecorates(), removeBg: self.removeBg)
-
-        let task = Task {
+        pickerTask?.cancel()
+        pickerTask = Task {
+            isLoadingSource = true
+            defer { isLoadingSource = false }
             do {
-              let result = try await self.gifTool?.createGif(parameter: parameter)
-              self.gifResult = result
-              self.photoItem = nil
+                logger.info("Picker load start")
+                if let imageData = try await pickerItem.loadTransferable(type: Data.self) {
+                    sourceImage = image(from: imageData)
+                }
+                sourceLivePhoto = try await pickerItem.loadTransferable(type: PHLivePhoto.self)
+                logger.info("Picker load done; generating")
+                scheduleAutoGenerate()
             } catch {
-                self.photoItem = nil
-                print("requestImages error: \(error)")
+                lastErrorMessage = error.localizedDescription
+                logger.error("Picker load failed: \(error.localizedDescription)")
             }
         }
-        self.task = task
     }
-    
-    func getImageDecorates() -> [ImageDecorateConfig] {
-        var array = [ImageDecorateConfig]()
-        
-        let text = "啊发手机阿萨德杰卡斯登记卡飞机啊飞机卡手\n打飞机"
-        let attributedString = NSAttributedString(string: text, attributes: [
-            .font: UIFont.systemFont(ofSize: 24),
-            .foregroundColor: UIColor.red,
-            .paragraphStyle: NSParagraphStyle.default
-        ])
-       let waterConfig1 = ImageDecorateConfig(type: .attributeText(text: attributedString), location: .center, offset: .init(x: -30, y: -30))
-        let waterConfig2 = ImageDecorateConfig(type: .attributeText(text: attributedString), location: .topLeft)
-        array.append(waterConfig1)
-        array.append(waterConfig2)
-         
-        
-        if let img = UIImage(named: "test") {
-            let waterConfig2 = ImageDecorateConfig(type: .image(image: img, width: 100), location: .center, offset: .init(x: -20, y: 40))
-            array.append(waterConfig2)
-            
-            let waterConfig3 = ImageDecorateConfig(type: .image(image: img, width: 100), location: .center)
-            array.append(waterConfig3)
+
+    func generateGIF() async throws {
+        guard let source = currentSource() else {
+            return
         }
-        
-        return array
+
+        let request = GIFGenerationRequest(
+            source: source,
+            options: GIFGenerationOptions(
+                outputFPS: outputFPS,
+                maxResolution: 500,
+                removeBackground: removeBackground,
+                includeOriginalFrames: true,
+                watermarks: makeWatermarks()
+            )
+        )
+        try await startGeneration(with: request)
     }
-    
-    func getRequestImages() -> [UIImage] {
-        if self.isShowStaticImage {
-            guard let photoImage = self.photoImage else { return [] }
-            return [photoImage]
+
+    func saveGIF() {
+        guard let generatedResult else {
+            return
         }
-        return self.gifResult?.frames ?? []
-    }
-    
-    func randomFrameTest() {
-        self.gifTool = nil
-        self.gifTool = LiveGifTool()
-        cancelTask()
-        self.requestImages()
-    }
-    
-    func savePhoto() {
-        cancelTask()
-        let task = Task {
-            guard let url = gifResult?.url else { return  }
-            try? await self.gifTool?.save(method: .url(url))
+        operationTask?.cancel()
+        operationTask = Task {
+            do {
+                logger.info("Save GIF start")
+                _ = try await gifToolKit.save(.init(payload: .fileURL(generatedResult.fileURL)))
+                saveStatus = "Saved"
+                logger.info("Save GIF success")
+            } catch {
+                saveStatus = "Failed"
+                lastErrorMessage = error.localizedDescription
+                logger.error("Save GIF failed: \(error.localizedDescription)")
+            }
         }
-        self.task = task
     }
-    
-    func cleanUp() {
-        try? self.gifTool?.cleanup()
-        self.gifTool = nil
-    }
-    
-    func cancelTask() {
-        if let task = self.task, task.isCancelled == false {
-            print("任务过程中。。取消任务")
-            task.cancel()
+
+    func removeBackgroundFromSourceImage() {
+        guard let sourceImage else {
+            return
         }
+        operationTask?.cancel()
+        operationTask = Task {
+            isRemovingBackground = true
+            defer { isRemovingBackground = false }
+            do {
+                logger.info("Single image remove background start")
+                let image = try await gifToolKit.removeBackground(from: sourceImage)
+                generatedResult = nil
+                singleBackgroundRemovedImage = image
+                lastErrorMessage = ""
+                logger.info("Single image remove background done")
+            } catch {
+                lastErrorMessage = error.localizedDescription
+                logger.error("Single image remove background failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func loadRecommendations() {
+        operationTask?.cancel()
+        operationTask = Task {
+            do {
+                let toolKit = gifToolKit
+                let request = GIFRecommendationRequest(days: 30)
+                logger.info("Recommendations start")
+                let images = try await Task(priority: .userInitiated) {
+                    try await toolKit.fetchRecommendedImages(request)
+                }.value
+                recommendedImages = images
+                showRecommendations = true
+                logger.info("Recommendations done: \(images.count)")
+            } catch {
+                lastErrorMessage = error.localizedDescription
+                logger.error("Recommendations failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func cleanup() {
+        operationTask?.cancel()
+        operationTask = Task {
+            logger.info("Cleanup start")
+            try? await gifToolKit.cleanup(.allTemporaryGIFFiles)
+            logger.info("Cleanup end")
+        }
+    }
+
+    private func scheduleAutoGenerate() {
+        guard currentSource() != nil else {
+            return
+        }
+        debounceTask?.cancel()
+        debounceTask = Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else {
+                return
+            }
+            try? await generateGIF()
+        }
+    }
+
+    private func startGeneration(with request: GIFGenerationRequest) async throws {
+        generationTask?.cancel()
+        isGenerating = true
+        let toolKit = gifToolKit
+
+        let task = Task<GIFGenerationResult, Error>(priority: .userInitiated) {
+            logger.info("Generate GIF start")
+            return try await toolKit.generateGIF(request)
+        }
+        generationTask = task
+
+        do {
+            let result = try await task.value
+            guard !Task.isCancelled else {
+                isGenerating = false
+                return
+            }
+            generatedResult = result
+            singleBackgroundRemovedImage = nil
+            logger.info("Generate GIF done with \(result.frames.count) frames")
+            lastErrorMessage = ""
+            isGenerating = false
+        } catch is CancellationError {
+            isGenerating = false
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            logger.error("Generate GIF failed: \(error.localizedDescription)")
+            isGenerating = false
+            throw error
+        }
+    }
+
+    private func currentSource() -> GIFGenerationSource? {
+        switch sourceMode {
+        case .image:
+            guard let sourceImage else {
+                return nil
+            }
+            return .images([sourceImage], adjustOrientation: true)
+        case .livePhoto:
+            if let sourceLivePhoto {
+                return .livePhoto(sourceLivePhoto, sourceFPS: sourceFPS)
+            }
+            guard let sourceImage else {
+                return nil
+            }
+            return .images([sourceImage], adjustOrientation: true)
+        }
+    }
+
+    private func makeWatermarks() -> [GIFWatermark] {
+        guard !watermarkText.isEmpty else {
+            return []
+        }
+        return [
+            GIFWatermark(
+                content: .text(watermarkText, font: .systemFont(ofSize: 26), textColor: .red, backgroundColor: .clear),
+                position: watermarkLocation
+            ),
+        ]
+    }
+
+    private func image(from data: Data) -> GIFImage? {
+        #if canImport(UIKit)
+        GIFImage(data: data)
+        #else
+        GIFImage(data: data)
+        #endif
     }
 }

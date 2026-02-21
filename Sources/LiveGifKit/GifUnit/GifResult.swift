@@ -1,19 +1,11 @@
-//
-//  File.swift
-//
-//
-//  Created by 汤小军 on 2024/1/1.
-//
-
 import Foundation
-import UIKit
-import Photos
 
 /// 生成的GIF
+@available(*, deprecated, message: "Use GIFGenerationResult.")
 public struct GifResult {
     public let url: URL
-    public let frames: [UIImage]
-    public var originFrames: [UIImage] = []
+    public let frames: [GIFImage]
+    public var originFrames: [GIFImage] = []
     public var data: Data? {
         return try? Data(contentsOf: url)
     }
@@ -22,4 +14,3 @@ public struct GifResult {
     public var totalTime: Double = 0
 #endif
 }
-
