@@ -36,6 +36,7 @@ public final class LiveGifTool {
     }
 
     @available(*, deprecated, message: "Use gifToolKit.removeBackground(from:)")
+    @MainActor
     public func removeBackground(uiImage: GIFImage) async throws -> Data? {
         let image = try await gifToolKit.removeBackground(from: uiImage)
         return image.gifPNGData

@@ -117,6 +117,7 @@ struct GIFToolKitImplTests {
     }
 
     @Test("Save and recommendations forward requests")
+    @MainActor
     func saveAndRecommendationsForwarding() async throws {
         let storage = TemporaryStorageStub()
         let encoding = EncodingStub()
@@ -539,6 +540,7 @@ private final class RecommendationProviderStub: GIFRecommendationProviding, @unc
     private var outputImages: [GIFImage] = []
     private var lastRequest: GIFRecommendationRequest?
 
+    @MainActor
     func fetch(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
         lastRequest = request
         let images = outputImages

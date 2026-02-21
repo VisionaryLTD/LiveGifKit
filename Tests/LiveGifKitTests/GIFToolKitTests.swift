@@ -7,6 +7,7 @@ import Foundation
 @Suite("GIFToolKit API")
 struct GIFToolKitTests {
     @Test("Default test dependency is unimplemented")
+    @MainActor
     func defaultDependencyThrows() async throws {
         @Dependency(\.gifToolKit) var gifToolKit
         await #expect(throws: GIFError.self) {
@@ -70,6 +71,7 @@ struct GIFToolKitTests {
 
     @Test("LiveGifTool compatibility wrapper forwards background removal")
     @available(*, deprecated)
+    @MainActor
     func liveGifToolForwardsBackgroundRemoval() async throws {
         let recorder = RecordingGIFToolKit()
         recorder.setBackgroundRemovalResult(makeImage())
@@ -206,6 +208,7 @@ final class RecordingGIFToolKit: GIFToolKit, @unchecked Sendable {
         return generationResult
     }
 
+    @MainActor
     func removeBackground(from image: GIFImage) async throws -> GIFImage {
         removeBackgroundCallCount += 1
         return backgroundRemovalResult ?? image
@@ -216,6 +219,7 @@ final class RecordingGIFToolKit: GIFToolKit, @unchecked Sendable {
         return GIFSaveResult(localIdentifier: "saved")
     }
 
+    @MainActor
     func fetchRecommendedImages(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
         []
     }

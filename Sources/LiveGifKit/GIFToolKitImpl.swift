@@ -41,6 +41,7 @@ internal protocol GIFTemporaryStorage: Sendable {
 }
 
 internal protocol GIFRecommendationProviding: Sendable {
+    @MainActor
     func fetch(_ request: GIFRecommendationRequest) async throws -> [GIFImage]
 }
 
@@ -383,6 +384,7 @@ internal struct GIFTemporaryStorageLive: GIFTemporaryStorage {
 }
 
 internal struct GIFRecommendationProviderLive: GIFRecommendationProviding {
+    @MainActor
     func fetch(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
         FetchPhoto.fetch(days: request.days, targetSize: request.thumbnailSize)
     }
