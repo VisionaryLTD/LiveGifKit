@@ -57,7 +57,7 @@ final class LiveGIFDemoViewModel {
 
     func warmUp() {
         operationTask?.cancel()
-        operationTask = Task {
+        operationTask = Task { @MainActor in
             logger.info("Preheat start")
             try? await gifToolKit.preheat()
             logger.info("Preheat end")
@@ -69,7 +69,7 @@ final class LiveGIFDemoViewModel {
             return
         }
         pickerTask?.cancel()
-        pickerTask = Task {
+        pickerTask = Task { @MainActor in
             isLoadingSource = true
             defer { isLoadingSource = false }
             do {
@@ -110,7 +110,7 @@ final class LiveGIFDemoViewModel {
             return
         }
         operationTask?.cancel()
-        operationTask = Task {
+        operationTask = Task { @MainActor in
             do {
                 logger.info("Save GIF start")
                 _ = try await gifToolKit.save(.init(payload: .fileURL(generatedResult.fileURL)))
@@ -129,7 +129,7 @@ final class LiveGIFDemoViewModel {
             return
         }
         operationTask?.cancel()
-        operationTask = Task {
+        operationTask = Task { @MainActor in
             isRemovingBackground = true
             defer { isRemovingBackground = false }
             do {
@@ -148,14 +148,11 @@ final class LiveGIFDemoViewModel {
 
     func loadRecommendations() {
         operationTask?.cancel()
-        operationTask = Task {
+        operationTask = Task { @MainActor in
             do {
-                let toolKit = gifToolKit
                 let request = GIFRecommendationRequest(days: 30)
                 logger.info("Recommendations start")
-                let images = try await Task(priority: .userInitiated) {
-                    try await toolKit.fetchRecommendedImages(request)
-                }.value
+                let images = try await gifToolKit.fetchRecommendedImages(request)
                 recommendedImages = images
                 showRecommendations = true
                 logger.info("Recommendations done: \(images.count)")
@@ -168,7 +165,7 @@ final class LiveGIFDemoViewModel {
 
     func cleanup() {
         operationTask?.cancel()
-        operationTask = Task {
+        operationTask = Task { @MainActor in
             logger.info("Cleanup start")
             try? await gifToolKit.cleanup(.allTemporaryGIFFiles)
             logger.info("Cleanup end")
@@ -180,7 +177,7 @@ final class LiveGIFDemoViewModel {
             return
         }
         debounceTask?.cancel()
-        debounceTask = Task {
+        debounceTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else {
                 return
@@ -194,7 +191,7 @@ final class LiveGIFDemoViewModel {
         isGenerating = true
         let toolKit = gifToolKit
 
-        let task = Task<GIFGenerationResult, Error>(priority: .userInitiated) {
+        let task = Task<GIFGenerationResult, Error>(priority: .userInitiated) { @MainActor in
             logger.info("Generate GIF start")
             return try await toolKit.generateGIF(request)
         }

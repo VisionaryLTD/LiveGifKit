@@ -117,6 +117,7 @@ internal struct GIFToolKitImpl: GIFToolKit {
         return result
     }
 
+    @MainActor
     func removeBackground(from image: GIFImage) async throws -> GIFImage {
         guard let cgImage = image.gifCGImage else {
             throw GifError.invalidImageData
@@ -131,6 +132,7 @@ internal struct GIFToolKitImpl: GIFToolKit {
         try await photoLibrary.save(request)
     }
 
+    @MainActor
     func fetchRecommendedImages(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
         try await recommendationProvider.fetch(request)
     }

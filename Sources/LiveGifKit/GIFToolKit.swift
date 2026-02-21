@@ -3,8 +3,10 @@ import Foundation
 
 public protocol GIFToolKit: Sendable {
     func generateGIF(_ request: GIFGenerationRequest) async throws -> GIFGenerationResult
+    @MainActor
     func removeBackground(from image: GIFImage) async throws -> GIFImage
     func save(_ request: GIFSaveRequest) async throws -> GIFSaveResult
+    @MainActor
     func fetchRecommendedImages(_ request: GIFRecommendationRequest) async throws -> [GIFImage]
     func preheat() async throws
     func cleanup(_ scope: GIFCleanupScope) async throws
@@ -38,6 +40,7 @@ internal struct GIFToolKitPreview: GIFToolKit {
         }
     }
 
+    @MainActor
     func removeBackground(from image: GIFImage) async throws -> GIFImage {
         image
     }
@@ -46,6 +49,7 @@ internal struct GIFToolKitPreview: GIFToolKit {
         GIFSaveResult(localIdentifier: nil)
     }
 
+    @MainActor
     func fetchRecommendedImages(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
         []
     }
@@ -60,6 +64,7 @@ internal struct GIFToolKitUnimplemented: GIFToolKit {
         throw GifError.unimplemented
     }
 
+    @MainActor
     func removeBackground(from image: GIFImage) async throws -> GIFImage {
         throw GifError.unimplemented
     }
@@ -68,6 +73,7 @@ internal struct GIFToolKitUnimplemented: GIFToolKit {
         throw GifError.unimplemented
     }
 
+    @MainActor
     func fetchRecommendedImages(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
         throw GifError.unimplemented
     }
@@ -80,4 +86,3 @@ internal struct GIFToolKitUnimplemented: GIFToolKit {
         throw GifError.unimplemented
     }
 }
-
