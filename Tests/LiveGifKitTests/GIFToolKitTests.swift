@@ -19,7 +19,7 @@ struct GIFToolKitTests {
     func liveGifToolForwardsGeneration() async throws {
         let recorder = RecordingGIFToolKit()
         let outputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "compat-wrapper.gif")
-        await recorder.setGenerationResult(.init(fileURL: outputURL, frames: [makeImage()]))
+        recorder.setGenerationResult(.init(fileURL: outputURL, frames: [makeImage()]))
 
         let legacyResult = try await withDependencies {
             $0.gifToolKit = recorder
@@ -39,7 +39,7 @@ struct GIFToolKitTests {
         #expect(legacyResult.url == outputURL)
         #expect(legacyResult.frames.count == 1)
 
-        let captured = await recorder.lastGenerationRequest
+        let captured = recorder.generationRequest()
         #expect(captured?.options.outputFPS == 22)
         #expect(captured?.options.maxResolution == 321)
         #expect(captured?.options.removeBackground == true)
@@ -59,7 +59,7 @@ struct GIFToolKitTests {
             try await tool.save(method: .url(saveURL))
         }
 
-        let captured = await recorder.lastSaveRequest
+        let captured = recorder.saveRequest()
         switch captured?.payload {
         case .fileURL(let url):
             #expect(url == saveURL)
@@ -72,7 +72,7 @@ struct GIFToolKitTests {
     @available(*, deprecated)
     func liveGifToolForwardsBackgroundRemoval() async throws {
         let recorder = RecordingGIFToolKit()
-        await recorder.setBackgroundRemovalResult(makeImage())
+        recorder.setBackgroundRemovalResult(makeImage())
 
         let outputData = try await withDependencies {
             $0.gifToolKit = recorder
@@ -82,7 +82,7 @@ struct GIFToolKitTests {
         }
 
         #expect(outputData != nil)
-        #expect(await recorder.removeBackgroundCallCount == 1)
+        #expect(recorder.removeBackgroundCalls() == 1)
     }
 
     @Test("Non-transparent bounds ignore low-alpha matte noise")
@@ -183,10 +183,10 @@ struct GIFToolKitTests {
     }
 }
 
-actor RecordingGIFToolKit: GIFToolKit {
-    var lastGenerationRequest: GIFGenerationRequest?
-    var lastSaveRequest: GIFSaveRequest?
-    var removeBackgroundCallCount = 0
+final class RecordingGIFToolKit: GIFToolKit, @unchecked Sendable {
+    private var lastGenerationRequest: GIFGenerationRequest?
+    private var lastSaveRequest: GIFSaveRequest?
+    private var removeBackgroundCallCount = 0
     private var generationResult = GIFGenerationResult(
         fileURL: URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "result.gif"),
         frames: []
@@ -223,4 +223,16 @@ actor RecordingGIFToolKit: GIFToolKit {
     func preheat() async throws {}
 
     func cleanup(_ scope: GIFCleanupScope) async throws {}
+
+    func generationRequest() -> GIFGenerationRequest? {
+        return lastGenerationRequest
+    }
+
+    func saveRequest() -> GIFSaveRequest? {
+        return lastSaveRequest
+    }
+
+    func removeBackgroundCalls() -> Int {
+        return removeBackgroundCallCount
+    }
 }

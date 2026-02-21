@@ -142,7 +142,7 @@ struct GIFToolKitImplTests {
         let images = try await toolKit.fetchRecommendedImages(recommendationRequest)
 
         #expect(saveResult.localIdentifier == "saved-id")
-        let lastSaveRequest = await photoLibrary.lastRequest
+        let lastSaveRequest = await photoLibrary.lastRequestValue()
         switch lastSaveRequest?.destination {
         case .photoLibrary(let albumName):
             #expect(albumName == "LifeStickers")
@@ -150,8 +150,9 @@ struct GIFToolKitImplTests {
             Issue.record("Expected photo library destination")
         }
         #expect(images.count == 1)
-        #expect(await recommendations.lastRequest?.days == 14)
-        #expect(await recommendations.lastRequest?.thumbnailSize == CGSize(width: 90, height: 70))
+        let lastRecommendationRequest = await recommendations.lastRequestValue()
+        #expect(lastRecommendationRequest?.days == 14)
+        #expect(lastRecommendationRequest?.thumbnailSize == CGSize(width: 90, height: 70))
     }
 
     @Test("Save propagates denied authorization error")
@@ -386,12 +387,12 @@ private final class EncodingStub: GIFEncoding, @unchecked Sendable {
     }
 }
 
-private actor VideoFrameExtractorStub: GIFVideoFrameExtracting {
-    var outputImages: [GIFImage] = []
-    var lastVideoURL: URL?
-    var lastSourceFPS: Double?
-    var lastMaxResolution: CGFloat?
-    var onExtract: ((URL, Double?, CGFloat) async throws -> [GIFImage])?
+private final class VideoFrameExtractorStub: GIFVideoFrameExtracting, @unchecked Sendable {
+    private var outputImages: [GIFImage] = []
+    private var lastVideoURL: URL?
+    private var lastSourceFPS: Double?
+    private var lastMaxResolution: CGFloat?
+    private var onExtract: ((URL, Double?, CGFloat) async throws -> [GIFImage])?
 
     func extractFrames(
         from videoURL: URL,
@@ -401,25 +402,28 @@ private actor VideoFrameExtractorStub: GIFVideoFrameExtracting {
         lastVideoURL = videoURL
         lastSourceFPS = sourceFPS
         lastMaxResolution = maxResolution
-        if let onExtract {
-            return try await onExtract(videoURL, sourceFPS, maxResolution)
+        let customHandler = onExtract
+        let images = outputImages
+
+        if let customHandler {
+            return try await customHandler(videoURL, sourceFPS, maxResolution)
         }
-        return outputImages
+        return images
     }
 
-    func snapshot() -> Snapshot {
-        Snapshot(
+    func snapshot() async -> Snapshot {
+        return Snapshot(
             lastVideoURL: lastVideoURL,
             lastSourceFPS: lastSourceFPS,
             lastMaxResolution: lastMaxResolution
         )
     }
 
-    func setOutputImages(_ images: [GIFImage]) {
+    func setOutputImages(_ images: [GIFImage]) async {
         outputImages = images
     }
 
-    func setOnExtract(_ handler: @escaping (URL, Double?, CGFloat) async throws -> [GIFImage]) {
+    func setOnExtract(_ handler: @escaping (URL, Double?, CGFloat) async throws -> [GIFImage]) async {
         onExtract = handler
     }
 
@@ -430,36 +434,38 @@ private actor VideoFrameExtractorStub: GIFVideoFrameExtracting {
     }
 }
 
-private actor BackgroundRemoverStub: GIFBackgroundRemoving {
-    var outputImages: [CGImage] = []
-    var onRemove: (([CGImage]) async throws -> [CGImage])?
-    private(set) var calls = 0
+private final class BackgroundRemoverStub: GIFBackgroundRemoving, @unchecked Sendable {
+    private var outputImages: [CGImage] = []
+    private var onRemove: (([CGImage]) async throws -> [CGImage])?
+    private var calls = 0
     private var didStart = false
     private var startContinuations: [CheckedContinuation<Void, Never>] = []
 
     func removeBackground(images: [CGImage]) async throws -> [CGImage] {
         calls += 1
         didStart = true
-        if !startContinuations.isEmpty {
-            let continuations = startContinuations
-            startContinuations.removeAll()
-            continuations.forEach { $0.resume() }
+        let continuations = startContinuations
+        startContinuations.removeAll()
+        let customRemove = onRemove
+        let currentOutput = outputImages
+
+        continuations.forEach { $0.resume() }
+
+        if let customRemove {
+            return try await customRemove(images)
         }
-        if let onRemove {
-            return try await onRemove(images)
-        }
-        return outputImages.isEmpty ? images : outputImages
+        return currentOutput.isEmpty ? images : currentOutput
     }
 
-    func snapshot() -> Snapshot {
-        Snapshot(calls: calls)
+    func snapshot() async -> Snapshot {
+        return Snapshot(calls: calls)
     }
 
-    func setOutputImages(_ images: [CGImage]) {
+    func setOutputImages(_ images: [CGImage]) async {
         outputImages = images
     }
 
-    func setOnRemove(_ handler: @escaping ([CGImage]) async throws -> [CGImage]) {
+    func setOnRemove(_ handler: @escaping ([CGImage]) async throws -> [CGImage]) async {
         onRemove = handler
     }
 
@@ -467,8 +473,13 @@ private actor BackgroundRemoverStub: GIFBackgroundRemoving {
         if didStart {
             return
         }
+
         await withCheckedContinuation { continuation in
-            startContinuations.append(continuation)
+            if didStart {
+                continuation.resume()
+            } else {
+                startContinuations.append(continuation)
+            }
         }
     }
 
@@ -477,25 +488,32 @@ private actor BackgroundRemoverStub: GIFBackgroundRemoving {
     }
 }
 
-private actor PhotoLibraryStub: GIFPhotoLibraryPersisting {
-    var output = GIFSaveResult(localIdentifier: nil)
-    var errorToThrow: AlbumToolError?
-    private(set) var lastRequest: GIFSaveRequest?
+private final class PhotoLibraryStub: GIFPhotoLibraryPersisting, @unchecked Sendable {
+    private var output = GIFSaveResult(localIdentifier: nil)
+    private var errorToThrow: AlbumToolError?
+    private var lastRequest: GIFSaveRequest?
 
     func save(_ request: GIFSaveRequest) async throws -> GIFSaveResult {
         lastRequest = request
-        if let errorToThrow {
-            throw errorToThrow
+        let error = errorToThrow
+        let output = output
+
+        if let error {
+            throw error
         }
         return output
     }
 
-    func setOutput(_ output: GIFSaveResult) {
+    func setOutput(_ output: GIFSaveResult) async {
         self.output = output
     }
 
-    func setError(_ error: AlbumToolError?) {
+    func setError(_ error: AlbumToolError?) async {
         errorToThrow = error
+    }
+
+    func lastRequestValue() async -> GIFSaveRequest? {
+        return lastRequest
     }
 }
 
@@ -517,16 +535,21 @@ private final class TemporaryStorageStub: GIFTemporaryStorage, @unchecked Sendab
     }
 }
 
-private actor RecommendationProviderStub: GIFRecommendationProviding {
-    var outputImages: [GIFImage] = []
-    private(set) var lastRequest: GIFRecommendationRequest?
+private final class RecommendationProviderStub: GIFRecommendationProviding, @unchecked Sendable {
+    private var outputImages: [GIFImage] = []
+    private var lastRequest: GIFRecommendationRequest?
 
     func fetch(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
         lastRequest = request
-        return outputImages
+        let images = outputImages
+        return images
     }
 
-    func setOutputImages(_ images: [GIFImage]) {
+    func setOutputImages(_ images: [GIFImage]) async {
         outputImages = images
+    }
+
+    func lastRequestValue() async -> GIFRecommendationRequest? {
+        return lastRequest
     }
 }
