@@ -57,13 +57,38 @@ internal actor GIFRequestDirectoryStore {
     }
 }
 
+private enum GIFFrameHandle: Sendable {
+    case memory(Data)
+    case file(URL)
+
+    func cgImage() throws -> CGImage {
+        let data: Data
+        switch self {
+        case .memory(let inMemoryData):
+            data = inMemoryData
+        case .file(let url):
+            data = try Data(contentsOf: url, options: .mappedIfSafe)
+        }
+        guard
+            let image = GIFImage(data: data),
+            let cgImage = image.gifCGImage
+        else {
+            throw GifError.invalidImageData
+        }
+        return cgImage
+    }
+}
+
 internal struct GIFToolKitImpl: GIFToolKit {
+    private static let defaultFrameStorageMemoryBudgetBytes = 64 * 1024 * 1024
+
     private let encoding: any GIFEncoding
     private let videoFrameExtractor: any GIFVideoFrameExtracting
     private let backgroundRemover: any GIFBackgroundRemoving
     private let photoLibrary: any GIFPhotoLibraryPersisting
     private let storage: any GIFTemporaryStorage
     private let recommendationProvider: any GIFRecommendationProviding
+    private let frameStorageMemoryBudgetBytes: Int
     private let requestDirectoryStore = GIFRequestDirectoryStore()
 
     internal init(
@@ -72,7 +97,8 @@ internal struct GIFToolKitImpl: GIFToolKit {
         backgroundRemover: any GIFBackgroundRemoving = GIFBackgroundRemoverLive(),
         photoLibrary: any GIFPhotoLibraryPersisting = GIFPhotoLibraryLive(),
         storage: any GIFTemporaryStorage = GIFTemporaryStorageLive(),
-        recommendationProvider: any GIFRecommendationProviding = GIFRecommendationProviderLive()
+        recommendationProvider: any GIFRecommendationProviding = GIFRecommendationProviderLive(),
+        frameStorageMemoryBudgetBytes: Int = GIFToolKitImpl.defaultFrameStorageMemoryBudgetBytes
     ) {
         self.encoding = encoding
         self.videoFrameExtractor = videoFrameExtractor
@@ -80,6 +106,7 @@ internal struct GIFToolKitImpl: GIFToolKit {
         self.photoLibrary = photoLibrary
         self.storage = storage
         self.recommendationProvider = recommendationProvider
+        self.frameStorageMemoryBudgetBytes = frameStorageMemoryBudgetBytes
     }
 
     func generateGIF(_ request: GIFGenerationRequest) async throws -> GIFGenerationResult {
@@ -94,7 +121,13 @@ internal struct GIFToolKitImpl: GIFToolKit {
             throw GifError.gifResultNil
         }
 
-        var cgImages = sourceImages.compactMap(\.gifCGImage)
+        let frameHandles = try makeFrameHandlesIfNeeded(from: sourceImages, directory: directory)
+        var cgImages: [CGImage]
+        if let frameHandles {
+            cgImages = try frameHandles.map { try $0.cgImage() }
+        } else {
+            cgImages = sourceImages.compactMap(\.gifCGImage)
+        }
         guard !cgImages.isEmpty else {
             throw GifError.invalidImageData
         }
@@ -158,6 +191,43 @@ internal struct GIFToolKitImpl: GIFToolKit {
             }
         case .allTemporaryGIFFiles:
             try storage.cleanupAll()
+        }
+    }
+
+    private func makeFrameHandlesIfNeeded(
+        from images: [GIFImage],
+        directory: URL
+    ) throws -> [GIFFrameHandle]? {
+        guard estimatedFrameBytes(for: images) > frameStorageMemoryBudgetBytes else {
+            return nil
+        }
+
+        var handles: [GIFFrameHandle] = []
+        handles.reserveCapacity(images.count)
+
+        var inMemoryBytes = 0
+        for (index, image) in images.enumerated() {
+            guard let pngData = image.gifPNGData else {
+                throw GifError.invalidImageData
+            }
+            if inMemoryBytes + pngData.count <= frameStorageMemoryBudgetBytes {
+                handles.append(.memory(pngData))
+                inMemoryBytes += pngData.count
+            } else {
+                let url = directory.appending(path: "frame-\(index).png")
+                try pngData.write(to: url, options: .atomic)
+                handles.append(.file(url))
+            }
+        }
+        return handles
+    }
+
+    private func estimatedFrameBytes(for images: [GIFImage]) -> Int {
+        images.reduce(into: 0) { total, image in
+            guard let cgImage = image.gifCGImage else {
+                return
+            }
+            total += cgImage.bytesPerRow * cgImage.height
         }
     }
 

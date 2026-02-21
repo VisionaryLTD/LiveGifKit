@@ -87,6 +87,45 @@ struct GIFToolKitImplTests {
         #expect(removerSnapshot.calls == 0)
     }
 
+    @Test("Generate GIF spills frames to temporary files when over memory budget")
+    func generateSpillsFramesWhenBudgetExceeded() async throws {
+        let storage = TemporaryStorageStub()
+        let encoding = EncodingStub()
+        let extractor = VideoFrameExtractorStub()
+        let backgroundRemover = BackgroundRemoverStub()
+        let photoLibrary = PhotoLibraryStub()
+        let recommendations = RecommendationProviderStub()
+        let first = makeGIFImage(width: 120, height: 120, alpha: 255)
+        let second = makeGIFImage(width: 120, height: 120, alpha: 255)
+        encoding.outputFrames = [first, second]
+
+        let toolKit = GIFToolKitImpl(
+            encoding: encoding,
+            videoFrameExtractor: extractor,
+            backgroundRemover: backgroundRemover,
+            photoLibrary: photoLibrary,
+            storage: storage,
+            recommendationProvider: recommendations,
+            frameStorageMemoryBudgetBytes: 1
+        )
+        _ = try await toolKit.generateGIF(
+            .init(
+                source: .images([first, second]),
+                options: GIFGenerationOptions(outputFPS: 20)
+            )
+        )
+
+        let files = try FileManager.default.contentsOfDirectory(
+            at: storage.directory,
+            includingPropertiesForKeys: nil
+        )
+        let spilledFrames = files.filter { $0.lastPathComponent.hasPrefix("frame-") && $0.pathExtension == "png" }
+        let snapshot = encoding.snapshot()
+
+        #expect(!spilledFrames.isEmpty)
+        #expect(snapshot.capturedCGImages.count == 2)
+    }
+
     @Test("Cleanup removes latest request directory and all temporary files")
     func cleanupScopes() async throws {
         let storage = TemporaryStorageStub()
@@ -524,7 +563,8 @@ private final class TemporaryStorageStub: GIFTemporaryStorage, @unchecked Sendab
     private(set) var cleanupAllCalls = 0
 
     func makeRequestDirectory() throws -> URL {
-        directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
 
     func cleanup(directory: URL) throws {
