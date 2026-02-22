@@ -143,7 +143,10 @@ public final class GIFToolKitSession {
 
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var previewTask: Task<GIFPreparedPreviewOutput, Error>?
+    @ObservationIgnored private var previewProgressTask: Task<Void, Never>?
     @ObservationIgnored private var previewTaskKey: GIFPreviewCacheKey?
+    @ObservationIgnored private var previewPipelineMode: PreviewPipelineMode = .preview
+    @ObservationIgnored private var previewPrepareStage: PreviewPrepareStage = .idle
     @ObservationIgnored private var previewCache: [GIFPreviewCacheKey: GIFPreviewCacheEntry] = [:]
     @ObservationIgnored private var previewLRUKeys: [GIFPreviewCacheKey] = []
     @ObservationIgnored private var latestPreparedPreviewKey: GIFPreviewCacheKey?
@@ -227,6 +230,7 @@ public final class GIFToolKitSession {
     deinit {
         debounceTask?.cancel()
         previewTask?.cancel()
+        previewProgressTask?.cancel()
     }
 
     public func regenerateNow() {
@@ -239,8 +243,11 @@ public final class GIFToolKitSession {
     public func cancelGeneration() {
         debounceTask?.cancel()
         previewTask?.cancel()
+        previewProgressTask?.cancel()
         previewTask = nil
+        previewProgressTask = nil
         previewTaskKey = nil
+        previewPrepareStage = .idle
         isPreparingPreview = false
         isSavingGIF = false
         isGenerating = false
@@ -253,7 +260,10 @@ public final class GIFToolKitSession {
     public func saveLatestGIF(
         destination: GIFSaveDestination = .photoLibrary(albumName: "LifeStickers")
     ) async throws -> GIFSaveResult {
-        guard let prepared = makePreparedPreviewRequest() else {
+        guard
+            let previewRequest = makePreparedPreviewRequest(mode: .preview),
+            let exportRequest = makePreparedPreviewRequest(mode: .save)
+        else {
             throw GifError.gifResultNil
         }
 
@@ -280,12 +290,27 @@ public final class GIFToolKitSession {
             recordMemorySnapshot(reason: "save-end")
         }
 
-        let previewEntry = try await ensurePreviewReady(for: prepared)
+        let previewEntry = try await ensurePreviewReady(
+            for: previewRequest,
+            applyToPreviewUI: true,
+            publishProgress: true
+        )
+        let entryToEncode: GIFPreviewCacheEntry
+        if previewRequest.key == exportRequest.key {
+            entryToEncode = previewEntry
+        } else {
+            generationState = .waitingPreview
+            entryToEncode = try await ensurePreviewReady(
+                for: exportRequest,
+                applyToPreviewUI: false,
+                publishProgress: false
+            )
+        }
         generationState = .encodingGIF
 
-        let saveKey = prepared.key.fileStem
+        let saveKey = exportRequest.key.fileStem
         let export = try await encodeFinalGIFWithBudget(
-            from: previewEntry.frameURLs,
+            from: entryToEncode.frameURLs,
             saveKey: saveKey
         )
         generationResult = export.result
@@ -357,8 +382,11 @@ private extension GIFToolKitSession {
         debounceTask?.cancel()
         guard attributes.source != nil else {
             previewTask?.cancel()
+            previewProgressTask?.cancel()
             previewTask = nil
+            previewProgressTask = nil
             previewTaskKey = nil
+            previewPrepareStage = .idle
             previewFrameURLs = []
             previewPixelSize = nil
             lastEffectiveSourceFPS = nil
@@ -383,7 +411,7 @@ private extension GIFToolKitSession {
     }
 
     func preparePreviewIfNeeded(force: Bool, waitForCompletion: Bool) async {
-        guard let prepared = makePreparedPreviewRequest() else {
+        guard let prepared = makePreparedPreviewRequest(mode: .preview) else {
             return
         }
 
@@ -396,7 +424,11 @@ private extension GIFToolKitSession {
             if waitForCompletion {
                 do {
                     let output = try await existingPreviewTask.value
-                    applyPreparedPreview(output, for: prepared.key)
+                    _ = applyPreparedPreview(
+                        output,
+                        for: prepared.key,
+                        applyToPreviewUI: true
+                    )
                 } catch is CancellationError {
                     return
                 } catch {
@@ -416,16 +448,24 @@ private extension GIFToolKitSession {
             return
         }
 
-        let task = launchPreviewTask(for: prepared)
+        let task = launchPreviewTask(
+            for: prepared,
+            publishProgress: true,
+            observeAutomatically: !waitForCompletion
+        )
         guard waitForCompletion else {
             return
         }
         do {
             let output = try await task.value
-            applyPreparedPreview(output, for: prepared.key)
+            applyPreparedPreview(
+                output,
+                for: prepared.key,
+                applyToPreviewUI: true
+            )
         } catch is CancellationError {
-                return
-            } catch {
+            return
+        } catch {
             if previewTaskKey == prepared.key {
                 lastErrorMessage = error.localizedDescription
                 previewState = .failed
@@ -440,25 +480,86 @@ private extension GIFToolKitSession {
         }
     }
 
-    func ensurePreviewReady(for prepared: GIFPreparedPreviewRequest) async throws -> GIFPreviewCacheEntry {
+    func ensurePreviewReady(
+        for prepared: GIFPreparedPreviewRequest,
+        applyToPreviewUI: Bool,
+        publishProgress: Bool
+    ) async throws -> GIFPreviewCacheEntry {
         if let cached = cachedPreviewEntry(for: prepared.key) {
-            applyPreview(entry: cached, key: prepared.key)
+            if applyToPreviewUI {
+                applyPreview(entry: cached, key: prepared.key)
+            }
             return cached
         }
 
-        await preparePreviewIfNeeded(force: true, waitForCompletion: true)
-
-        if let cached = cachedPreviewEntry(for: prepared.key) {
-            applyPreview(entry: cached, key: prepared.key)
-            return cached
+        if previewTaskKey == prepared.key, let task = previewTask {
+            do {
+                let output = try await task.value
+                if applyToPreviewUI {
+                    return applyPreparedPreview(
+                        output,
+                        for: prepared.key,
+                        applyToPreviewUI: true
+                    )
+                } else {
+                    return applyPreparedPreview(
+                        output,
+                        for: prepared.key,
+                        applyToPreviewUI: false
+                    )
+                }
+            } catch is CancellationError {
+                throw GifError.gifResultNil
+            } catch {
+                throw error
+            }
         }
-        throw GifError.gifResultNil
+
+        let task = launchPreviewTask(
+            for: prepared,
+            publishProgress: publishProgress,
+            observeAutomatically: false
+        )
+        do {
+            let output = try await task.value
+            let entry = applyPreparedPreview(
+                output,
+                for: prepared.key,
+                applyToPreviewUI: applyToPreviewUI
+            )
+            return entry
+        } catch is CancellationError {
+            throw GifError.gifResultNil
+        } catch {
+            if previewTaskKey == prepared.key {
+                lastErrorMessage = error.localizedDescription
+                previewState = .failed
+                generationState = .failed
+                isPreparingPreview = false
+                if !isSavingGIF {
+                    isGenerating = false
+                }
+                previewTask = nil
+                previewTaskKey = nil
+                previewPrepareStage = .idle
+                previewProgressTask?.cancel()
+                previewProgressTask = nil
+            }
+            throw error
+        }
     }
 
     @discardableResult
-    func launchPreviewTask(for prepared: GIFPreparedPreviewRequest) -> Task<GIFPreparedPreviewOutput, Error> {
+    func launchPreviewTask(
+        for prepared: GIFPreparedPreviewRequest,
+        publishProgress: Bool,
+        observeAutomatically: Bool
+    ) -> Task<GIFPreparedPreviewOutput, Error> {
         previewTask?.cancel()
+        previewProgressTask?.cancel()
         previewTaskKey = prepared.key
+        previewPipelineMode = prepared.mode
+        previewPrepareStage = .extractingFrames
 
         isPreparingPreview = true
         previewState = .preparing
@@ -486,9 +587,18 @@ private extension GIFToolKitSession {
         }
         previewTask = task
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await observePreviewTask(task, for: prepared.key)
+        if publishProgress, prepared.mode == .preview {
+            startPreviewProgressObservation(
+                for: prepared.key,
+                frameDirectory: prepared.frameDirectory
+            )
+        }
+
+        if observeAutomatically {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await observePreviewTask(task, for: prepared.key)
+            }
         }
         return task
     }
@@ -502,7 +612,11 @@ private extension GIFToolKitSession {
             guard previewTaskKey == key else {
                 return
             }
-            applyPreparedPreview(output, for: key)
+            _ = applyPreparedPreview(
+                output,
+                for: key,
+                applyToPreviewUI: true
+            )
         } catch is CancellationError {
             guard previewTaskKey == key else {
                 return
@@ -515,6 +629,9 @@ private extension GIFToolKitSession {
             }
             previewTask = nil
             previewTaskKey = nil
+            previewPrepareStage = .idle
+            previewProgressTask?.cancel()
+            previewProgressTask = nil
         } catch {
             guard previewTaskKey == key else {
                 return
@@ -528,11 +645,19 @@ private extension GIFToolKitSession {
             }
             previewTask = nil
             previewTaskKey = nil
+            previewPrepareStage = .idle
+            previewProgressTask?.cancel()
+            previewProgressTask = nil
             recordMemorySnapshot(reason: "preview-failed")
         }
     }
 
-    func applyPreparedPreview(_ output: GIFPreparedPreviewOutput, for key: GIFPreviewCacheKey) {
+    @discardableResult
+    func applyPreparedPreview(
+        _ output: GIFPreparedPreviewOutput,
+        for key: GIFPreviewCacheKey,
+        applyToPreviewUI: Bool
+    ) -> GIFPreviewCacheEntry {
         let entry = GIFPreviewCacheEntry(
             framesDirectory: output.framesDirectory,
             frameURLs: output.frameURLs,
@@ -546,7 +671,25 @@ private extension GIFToolKitSession {
         previewCache[key] = entry
         touchPreviewLRU(for: key)
         trimPreviewCacheIfNeeded(keeping: key)
-        applyPreview(entry: entry, key: key)
+        previewPrepareStage = .completed
+        if applyToPreviewUI {
+            applyPreview(entry: entry, key: key)
+        } else {
+            isPreparingPreview = false
+            previewState = .ready
+            previewTask = nil
+            previewTaskKey = nil
+            previewPrepareStage = .idle
+            previewProgressTask?.cancel()
+            previewProgressTask = nil
+            if !isSavingGIF {
+                isGenerating = false
+                generationState = .idle
+                generationProgress = nil
+            }
+            recordMemorySnapshot(reason: "preview-ready")
+        }
+        return entry
     }
 
     func applyPreview(entry: GIFPreviewCacheEntry, key: GIFPreviewCacheKey) {
@@ -562,8 +705,53 @@ private extension GIFToolKitSession {
         }
         previewTask = nil
         previewTaskKey = nil
+        previewPrepareStage = .idle
+        previewProgressTask?.cancel()
+        previewProgressTask = nil
         lastErrorMessage = ""
         recordMemorySnapshot(reason: "preview-ready")
+    }
+
+    func startPreviewProgressObservation(
+        for key: GIFPreviewCacheKey,
+        frameDirectory: URL
+    ) {
+        previewProgressTask?.cancel()
+        previewProgressTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var previousCount = 0
+            while !Task.isCancelled {
+                guard previewTaskKey == key, isPreparingPreview else {
+                    return
+                }
+                let frameURLs = discoverPreviewFrameURLs(in: frameDirectory)
+                if frameURLs.count > previousCount {
+                    previousCount = frameURLs.count
+                    previewPrepareStage = .applyingEffects
+                    previewFrameURLs = frameURLs
+                    if previewPixelSize == nil, let firstFrameURL = frameURLs.first {
+                        if let image = GIFImage.gifImage(contentsOf: firstFrameURL) {
+                            previewPixelSize = image.size
+                        }
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+
+    func discoverPreviewFrameURLs(in frameDirectory: URL) -> [URL] {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: frameDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return urls
+            .filter { $0.pathExtension.lowercased() == "png" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 }
 
@@ -704,10 +892,15 @@ private extension GIFToolKitSession {
 // MARK: - Preview Request / Cache
 
 private extension GIFToolKitSession {
-    func makePreparedPreviewRequest() -> GIFPreparedPreviewRequest? {
+    func makePreparedPreviewRequest(mode: PreviewPipelineMode) -> GIFPreparedPreviewRequest? {
         guard let source = attributes.source else {
             return nil
         }
+
+        let effectivePreviewResolution = effectiveResolution(
+            for: source,
+            mode: mode
+        )
 
         let keySource: GIFPreviewKeySource
         let requestSource: GIFGenerationURLSource
@@ -738,7 +931,7 @@ private extension GIFToolKitSession {
 
         let key = GIFPreviewCacheKey(
             source: keySource,
-            maxResolution: normalize(attributes.maxResolution),
+            maxResolution: normalize(effectivePreviewResolution),
             maxFrameCount: attributes.maxFrameCount,
             decodeMemoryBudgetMB: attributes.decodeMemoryBudgetMB,
             removeBackground: attributes.removeBackground,
@@ -753,8 +946,9 @@ private extension GIFToolKitSession {
         let frameDirectory = previewDirectory.appending(path: key.fileStem)
         return GIFPreparedPreviewRequest(
             key: key,
+            mode: mode,
             source: requestSource,
-            maxResolution: attributes.maxResolution,
+            maxResolution: effectivePreviewResolution,
             maxFrameCount: attributes.maxFrameCount,
             decodeMemoryBudgetMB: attributes.decodeMemoryBudgetMB,
             removeBackground: attributes.removeBackground,
@@ -767,6 +961,26 @@ private extension GIFToolKitSession {
             watermarks: makeWatermarks(),
             frameDirectory: frameDirectory
         )
+    }
+
+    func effectiveResolution(
+        for source: GIFEditorAttributes.Source,
+        mode: PreviewPipelineMode
+    ) -> CGFloat {
+        let baseResolution = attributes.maxResolution
+        guard mode == .preview else {
+            return baseResolution
+        }
+        guard !attributes.removeBackground else {
+            return baseResolution
+        }
+
+        switch source {
+        case .livePhotoVideoFile, .videoFile:
+            return min(baseResolution, 420)
+        case .imageFiles:
+            return baseResolution
+        }
     }
 
     func makeWatermarks() -> [GIFWatermark] {
@@ -930,8 +1144,21 @@ private extension GIFToolKitSession {
     }
 }
 
+private enum PreviewPipelineMode: Sendable {
+    case preview
+    case save
+}
+
+private enum PreviewPrepareStage: Sendable {
+    case idle
+    case extractingFrames
+    case applyingEffects
+    case completed
+}
+
 private struct GIFPreparedPreviewRequest: Sendable {
     let key: GIFPreviewCacheKey
+    let mode: PreviewPipelineMode
     let source: GIFGenerationURLSource
     let maxResolution: CGFloat
     let maxFrameCount: Int
@@ -1068,6 +1295,27 @@ private enum GIFPreviewPipeline {
         }
         try FileManager.default.createDirectory(at: request.frameDirectory, withIntermediateDirectories: true)
 
+        if !request.removeBackground {
+            switch request.source {
+            case .videoFile(let videoURL, let sourceFPS):
+                return try await prepareStreamingPreview(
+                    videoURL: videoURL,
+                    sourceFPS: sourceFPS,
+                    request: request,
+                    videoFrameExtractor: videoFrameExtractor
+                )
+            case .livePhotoVideoFile(let videoURL, let sourceFPS):
+                return try await prepareStreamingPreview(
+                    videoURL: videoURL,
+                    sourceFPS: sourceFPS,
+                    request: request,
+                    videoFrameExtractor: videoFrameExtractor
+                )
+            case .imageFiles:
+                break
+            }
+        }
+
         let source = try await sourceImages(
             from: request,
             videoFrameExtractor: videoFrameExtractor
@@ -1100,19 +1348,17 @@ private enum GIFPreviewPipeline {
 
         for (index, cgImage) in cgImages.enumerated() {
             try Task.checkCancellation()
-            var frameImage = GIFImage.gifImage(cgImage: cgImage)
-            frameImage = frameImage.decorate(watermarks: request.watermarks)
-            if index == 0 {
-                pixelSize = frameImage.size
-            }
-            guard let pngData = frameImage.gifPNGData else {
-                throw GifError.invalidImageData
-            }
-
             let frameURL = request.frameDirectory.appending(path: String(format: "frame-%04d.png", index))
-            try pngData.write(to: frameURL, options: .atomic)
+            let frameResult = try writeDecoratedFrame(
+                cgImage: cgImage,
+                watermarks: request.watermarks,
+                outputURL: frameURL
+            )
+            if index == 0 {
+                pixelSize = frameResult.pixelSize
+            }
             frameURLs.append(frameURL)
-            bytesOnDisk += pngData.count
+            bytesOnDisk += frameResult.bytesOnDisk
         }
 
         guard !frameURLs.isEmpty else {
@@ -1126,6 +1372,131 @@ private enum GIFPreviewPipeline {
             bytesOnDisk: bytesOnDisk,
             extractionSummary: source.extractionSummary
         )
+    }
+
+    private static func prepareStreamingPreview(
+        videoURL: URL,
+        sourceFPS: Double?,
+        request: GIFPreparedPreviewRequest,
+        videoFrameExtractor: any GIFVideoFrameExtracting
+    ) async throws -> GIFPreparedPreviewOutput {
+        let shouldDecorateFrames = !request.watermarks.isEmpty
+        let extractionDirectory = shouldDecorateFrames
+            ? request.frameDirectory.appending(path: "raw")
+            : request.frameDirectory
+        let framePrefix = shouldDecorateFrames ? "raw-frame" : "frame"
+        let extractionOutput = try await videoFrameExtractor.extractFrameFiles(
+            from: videoURL,
+            policy: GIFFrameExtractionPolicy(
+                sourceFPS: sourceFPS,
+                maxResolution: request.maxResolution,
+                maxFrameCount: request.maxFrameCount,
+                decodeMemoryBudgetBytes: request.decodeMemoryBudgetMB * 1024 * 1024
+            ),
+            outputDirectory: extractionDirectory,
+            frameFilePrefix: framePrefix
+        )
+
+        if !shouldDecorateFrames {
+            let bytesOnDisk = extractionOutput.frameURLs.reduce(into: 0) { partialResult, frameURL in
+                if
+                    let values = try? frameURL.resourceValues(forKeys: [.fileSizeKey]),
+                    let fileSize = values.fileSize
+                {
+                    partialResult += fileSize
+                }
+            }
+            return GIFPreparedPreviewOutput(
+                frameURLs: extractionOutput.frameURLs,
+                pixelSize: extractionOutput.pixelSize,
+                framesDirectory: request.frameDirectory,
+                bytesOnDisk: bytesOnDisk,
+                extractionSummary: GIFExtractionSummary(
+                    effectiveSourceFPS: extractionOutput.effectiveSourceFPS,
+                    effectiveMaxResolution: extractionOutput.effectiveMaxResolution,
+                    estimatedDecodeBytes: extractionOutput.estimatedDecodeBytes
+                )
+            )
+        }
+
+        var frameURLs: [URL] = []
+        frameURLs.reserveCapacity(extractionOutput.frameURLs.count)
+        var pixelSize = CGSize.zero
+        var bytesOnDisk = 0
+
+        for (index, rawFrameURL) in extractionOutput.frameURLs.enumerated() {
+            try Task.checkCancellation()
+            let finalFrameURL = request.frameDirectory.appending(path: String(format: "frame-%04d.png", index))
+            let frameResult = try writeDecoratedFrame(
+                sourceURL: rawFrameURL,
+                watermarks: request.watermarks,
+                outputURL: finalFrameURL
+            )
+            if index == 0 {
+                pixelSize = frameResult.pixelSize
+            }
+            frameURLs.append(finalFrameURL)
+            bytesOnDisk += frameResult.bytesOnDisk
+            try? FileManager.default.removeItem(at: rawFrameURL)
+        }
+
+        try? FileManager.default.removeItem(at: extractionDirectory)
+
+        guard !frameURLs.isEmpty else {
+            throw GifError.gifResultNil
+        }
+
+        return GIFPreparedPreviewOutput(
+            frameURLs: frameURLs,
+            pixelSize: pixelSize == .zero ? extractionOutput.pixelSize : pixelSize,
+            framesDirectory: request.frameDirectory,
+            bytesOnDisk: bytesOnDisk,
+            extractionSummary: GIFExtractionSummary(
+                effectiveSourceFPS: extractionOutput.effectiveSourceFPS,
+                effectiveMaxResolution: extractionOutput.effectiveMaxResolution,
+                estimatedDecodeBytes: extractionOutput.estimatedDecodeBytes
+            )
+        )
+    }
+
+    private static func writeDecoratedFrame(
+        sourceURL: URL,
+        watermarks: [GIFWatermark],
+        outputURL: URL
+    ) throws -> GIFFrameWriteResult {
+        try autoreleasepool {
+            guard var frameImage = GIFImage.gifImage(contentsOf: sourceURL) else {
+                throw GifError.invalidImageData
+            }
+            frameImage = frameImage.decorate(watermarks: watermarks)
+            guard let pngData = frameImage.gifPNGData else {
+                throw GifError.invalidImageData
+            }
+            try pngData.write(to: outputURL, options: .atomic)
+            return GIFFrameWriteResult(
+                pixelSize: frameImage.size,
+                bytesOnDisk: pngData.count
+            )
+        }
+    }
+
+    private static func writeDecoratedFrame(
+        cgImage: CGImage,
+        watermarks: [GIFWatermark],
+        outputURL: URL
+    ) throws -> GIFFrameWriteResult {
+        try autoreleasepool {
+            var frameImage = GIFImage.gifImage(cgImage: cgImage)
+            frameImage = frameImage.decorate(watermarks: watermarks)
+            guard let pngData = frameImage.gifPNGData else {
+                throw GifError.invalidImageData
+            }
+            try pngData.write(to: outputURL, options: .atomic)
+            return GIFFrameWriteResult(
+                pixelSize: frameImage.size,
+                bytesOnDisk: pngData.count
+            )
+        }
     }
 
     private static func sourceImages(
@@ -1274,6 +1645,11 @@ private enum GIFPreviewPipeline {
             return cropped
         }
     }
+}
+
+private struct GIFFrameWriteResult {
+    let pixelSize: CGSize
+    let bytesOnDisk: Int
 }
 
 private enum GIFFinalEncodePipeline {
