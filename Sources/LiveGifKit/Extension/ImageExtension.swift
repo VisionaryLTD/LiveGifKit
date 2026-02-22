@@ -1,6 +1,5 @@
 import Foundation
 import Vision
-import CoreImage.CIFilterBuiltins
 import CoreGraphics
 
 #if canImport(UIKit)
