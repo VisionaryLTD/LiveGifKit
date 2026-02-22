@@ -124,13 +124,18 @@ struct GIFToolKitSessionTests {
 
         let lock = NSLock()
         var continuation: CheckedContinuation<Void, Never>?
-        extractor.onExtract = { _, _, _ in
+        extractor.onExtract = { _, _ in
             await withCheckedContinuation { (resume: CheckedContinuation<Void, Never>) in
                 lock.withLock {
                     continuation = resume
                 }
             }
-            return [makeGIFImage(width: 120, height: 80, alpha: 255)]
+            return GIFVideoExtractionOutput(
+                frames: [makeGIFImage(width: 120, height: 80, alpha: 255)],
+                effectiveSourceFPS: 12,
+                effectiveMaxResolution: 120,
+                estimatedDecodeBytes: 120 * 80 * 4
+            )
         }
 
         session.attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
@@ -261,6 +266,146 @@ struct GIFToolKitSessionTests {
         #expect(session.memoryTelemetry.residentMB >= 0)
         #expect(session.memoryTelemetry.peakResidentMB >= session.memoryTelemetry.residentMB)
     }
+
+    @Test("Input governance forwards frame extraction policy")
+    func inputGovernanceForwardsPolicy() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        extractor.outputImages = [makeGIFImage(width: 300, height: 200, alpha: 255)]
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let sourceURL = try makeTempFileURL(ext: "mov")
+
+        var attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        attributes.sourceFPS = 18
+        attributes.maxResolution = 640
+        attributes.maxFrameCount = 42
+        attributes.decodeMemoryBudgetMB = 24
+        session.attributes = attributes
+
+        await waitUntil { !session.previewFrameURLs.isEmpty }
+        let policy = try #require(extractor.lastPolicy())
+        #expect(policy.sourceFPS == 18)
+        #expect(policy.maxResolution == 640)
+        #expect(policy.maxFrameCount == 42)
+        #expect(policy.decodeMemoryBudgetBytes == 24 * 1024 * 1024)
+    }
+
+    @Test("Save with budget converges to fit file size")
+    func saveWithBudgetConverges() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        extractor.outputImages = [makeGIFImage(width: 800, height: 800, alpha: 255)]
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let sourceURL = try makeTempFileURL(ext: "mov")
+
+        var attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        attributes.outputFPS = 10
+        attributes.maxResolution = 800
+        attributes.exportMaxLongEdge = 240
+        attributes.exportMaxFileSizeBytes = 1_600
+        session.attributes = attributes
+        await waitUntil { !session.previewFrameURLs.isEmpty }
+
+        _ = try await session.saveLatestGIF()
+        #expect((session.lastExportFileSizeBytes ?? 0) <= 1_600)
+        #expect(session.lastExportStatus == "FitInBudget")
+        #expect(session.lastExportPassCount >= 1)
+    }
+
+    @Test("Save without budget is unconstrained")
+    func saveWithoutBudgetIsUnconstrained() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        extractor.outputImages = [makeGIFImage(width: 200, height: 120, alpha: 255)]
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let sourceURL = try makeTempFileURL(ext: "mov")
+
+        var attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        attributes.exportMaxFileSizeBytes = nil
+        attributes.exportMaxLongEdge = nil
+        session.attributes = attributes
+        await waitUntil { !session.previewFrameURLs.isEmpty }
+
+        _ = try await session.saveLatestGIF()
+        #expect(session.lastExportStatus == "Unconstrained")
+        #expect(session.lastExportPassCount == 1)
+    }
+
+    @Test("Save with impossible budget fails with hit-min-quality")
+    func saveImpossibleBudgetFails() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        extractor.outputImages = [makeGIFImage(width: 600, height: 600, alpha: 255)]
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let sourceURL = try makeTempFileURL(ext: "mov")
+
+        var attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        attributes.exportMaxLongEdge = 160
+        attributes.exportMaxFileSizeBytes = 32
+        session.attributes = attributes
+        await waitUntil { !session.previewFrameURLs.isEmpty }
+
+        do {
+            _ = try await session.saveLatestGIF()
+            Issue.record("Expected save to fail under impossible budget")
+        } catch {
+            #expect(!error.localizedDescription.isEmpty)
+        }
+        #expect(session.lastExportStatus == "HitMinQuality")
+    }
+
+    @Test("Auto subject framing enlarges small subject")
+    func autoSubjectFramingEnlargesSubject() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let imageURL = try makeSubjectImageFile(canvas: 200, subjectRect: CGRect(x: 82, y: 82, width: 36, height: 36))
+
+        var baseAttributes = GIFEditorAttributes(source: .imageFiles([imageURL], adjustOrientation: true))
+        baseAttributes.maxResolution = 200
+        baseAttributes.removeBackground = true
+        baseAttributes.enableAutoSubjectFraming = false
+        session.attributes = baseAttributes
+        await waitUntil { !session.previewFrameURLs.isEmpty }
+        let baselinePreparationCount = session.previewPreparationCount
+        let baselineFill = try #require(previewFill(from: session))
+
+        var framingAttributes = baseAttributes
+        framingAttributes.enableAutoSubjectFraming = true
+        framingAttributes.subjectTargetFillRatio = 0.70
+        framingAttributes.subjectMaxUpscale = 3
+        session.attributes = framingAttributes
+        await waitUntil { session.previewPreparationCount > baselinePreparationCount && !session.isPreparingPreview }
+        let framedFill = try #require(previewFill(from: session))
+
+        #expect(framedFill > baselineFill)
+        #expect(framedFill - baselineFill >= 0.15)
+    }
 }
 
 // MARK: - Helpers
@@ -300,6 +445,32 @@ private func makeTempImageFileURL() throws -> URL {
 }
 
 @MainActor
+private func makeSubjectImageFile(canvas: Int, subjectRect: CGRect) throws -> URL {
+    let image = GIFImage.gifImage(cgImage: makeSubjectCGImage(canvas: canvas, subjectRect: subjectRect))
+    guard let data = image.gifPNGData else {
+        throw GifError.invalidImageData
+    }
+    let url = try makeTempFileURL(ext: "png")
+    try data.write(to: url, options: .atomic)
+    return url
+}
+
+@MainActor
+private func previewFill(from session: GIFToolKitSession) -> CGFloat? {
+    guard let previewURL = session.previewFrameURLs.first else {
+        return nil
+    }
+    guard
+        let previewImage = GIFImage.gifImage(contentsOf: previewURL),
+        let cgImage = previewImage.gifCGImage,
+        let rect = cgImage.nonTransparentBoundingBox()
+    else {
+        return nil
+    }
+    return max(rect.width / CGFloat(cgImage.width), rect.height / CGFloat(cgImage.height))
+}
+
+@MainActor
 private func waitUntil(
     timeout: Duration = .seconds(2),
     interval: Duration = .milliseconds(20),
@@ -332,6 +503,46 @@ private func makeCGImage(width: Int, height: Int, alpha: UInt8) -> CGImage {
         pixels[index + 1] = 255
         pixels[index + 2] = 255
         pixels[index + 3] = alpha
+    }
+
+    let provider = CGDataProvider(data: Data(pixels) as CFData)!
+    return CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: bitsPerComponent,
+        bitsPerPixel: bytesPerPixel * bitsPerComponent,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent
+    )!
+}
+
+private func makeSubjectCGImage(canvas: Int, subjectRect: CGRect) -> CGImage {
+    let width = canvas
+    let height = canvas
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bytesPerPixel = 4
+    let bytesPerRow = width * bytesPerPixel
+    let bitsPerComponent = 8
+    var pixels = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+
+    let minX = max(0, Int(subjectRect.minX))
+    let maxX = min(width, Int(subjectRect.maxX))
+    let minY = max(0, Int(subjectRect.minY))
+    let maxY = min(height, Int(subjectRect.maxY))
+
+    for y in minY..<maxY {
+        for x in minX..<maxX {
+            let index = (y * width + x) * 4
+            pixels[index] = 255
+            pixels[index + 1] = 255
+            pixels[index + 2] = 255
+            pixels[index + 3] = 255
+        }
     }
 
     let provider = CGDataProvider(data: Data(pixels) as CFData)!
@@ -454,22 +665,35 @@ private final class SessionRecorderGIFToolKit: GIFToolKit, @unchecked Sendable {
 private final class SessionVideoFrameExtractorStub: GIFVideoFrameExtracting, @unchecked Sendable {
     private let lock = NSLock()
     var outputImages: [GIFImage] = []
-    var onExtract: ((URL, Double?, CGFloat) async throws -> [GIFImage])?
+    var onExtract: ((URL, GIFFrameExtractionPolicy) async throws -> GIFVideoExtractionOutput)?
     private var calls = 0
+    private var latestPolicy: GIFFrameExtractionPolicy?
 
-    func extractFrames(from videoURL: URL, sourceFPS: Double?, maxResolution: CGFloat) async throws -> [GIFImage] {
+    func extractFrames(from videoURL: URL, policy: GIFFrameExtractionPolicy) async throws -> GIFVideoExtractionOutput {
         lock.withLock {
             calls += 1
+            latestPolicy = policy
         }
         if let onExtract {
-            return try await onExtract(videoURL, sourceFPS, maxResolution)
+            return try await onExtract(videoURL, policy)
         }
-        return outputImages
+        return GIFVideoExtractionOutput(
+            frames: outputImages,
+            effectiveSourceFPS: policy.sourceFPS ?? 0,
+            effectiveMaxResolution: policy.maxResolution,
+            estimatedDecodeBytes: outputImages.count * 1024
+        )
     }
 
     func callCount() -> Int {
         lock.withLock {
             calls
+        }
+    }
+
+    func lastPolicy() -> GIFFrameExtractionPolicy? {
+        lock.withLock {
+            latestPolicy
         }
     }
 }
@@ -495,7 +719,11 @@ private final class SessionEncodingStub: GIFEncoding, @unchecked Sendable {
             calls += 1
         }
         let frames = cgImages.map { GIFImage.gifImage(cgImage: $0) }
-        try Data([0x47, 0x49, 0x46]).write(to: outputURL, options: .atomic)
+        let totalPixels = cgImages.reduce(into: 0) { partialResult, image in
+            partialResult += image.width * image.height
+        }
+        let estimatedBytes = max(3, totalPixels / 20)
+        try Data(repeating: 0x47, count: estimatedBytes).write(to: outputURL, options: .atomic)
         onProgress(cgImages.count, cgImages.count)
         return frames
     }

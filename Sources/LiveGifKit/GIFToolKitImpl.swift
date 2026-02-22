@@ -19,9 +19,8 @@ internal protocol GIFEncoding: Sendable {
 internal protocol GIFVideoFrameExtracting: Sendable {
     func extractFrames(
         from videoURL: URL,
-        sourceFPS: Double?,
-        maxResolution: CGFloat
-    ) async throws -> [GIFImage]
+        policy: GIFFrameExtractionPolicy
+    ) async throws -> GIFVideoExtractionOutput
 }
 
 internal protocol GIFBackgroundRemoving: Sendable {
@@ -40,6 +39,44 @@ internal protocol GIFTemporaryStorage: Sendable {
 
 internal protocol GIFRecommendationProviding: Sendable {
     func fetch(_ request: GIFRecommendationURLRequest) async throws -> [GIFRecommendedAsset]
+}
+
+internal struct GIFFrameExtractionPolicy: Sendable {
+    let sourceFPS: Double?
+    let maxResolution: CGFloat
+    let maxFrameCount: Int
+    let decodeMemoryBudgetBytes: Int
+
+    init(
+        sourceFPS: Double?,
+        maxResolution: CGFloat,
+        maxFrameCount: Int = 150,
+        decodeMemoryBudgetBytes: Int = 64 * 1024 * 1024
+    ) {
+        self.sourceFPS = sourceFPS
+        self.maxResolution = maxResolution
+        self.maxFrameCount = max(1, maxFrameCount)
+        self.decodeMemoryBudgetBytes = max(1, decodeMemoryBudgetBytes)
+    }
+}
+
+internal struct GIFVideoExtractionOutput: @unchecked Sendable {
+    let frames: [GIFImage]
+    let effectiveSourceFPS: Double
+    let effectiveMaxResolution: CGFloat
+    let estimatedDecodeBytes: Int
+
+    init(
+        frames: [GIFImage],
+        effectiveSourceFPS: Double,
+        effectiveMaxResolution: CGFloat,
+        estimatedDecodeBytes: Int
+    ) {
+        self.frames = frames
+        self.effectiveSourceFPS = effectiveSourceFPS
+        self.effectiveMaxResolution = effectiveMaxResolution
+        self.estimatedDecodeBytes = estimatedDecodeBytes
+    }
 }
 
 internal actor GIFRequestDirectoryStore {
@@ -372,17 +409,27 @@ internal struct GIFToolKitImpl: GIFToolKit {
             }
             return images
         case .videoFile(let videoURL, let sourceFPS):
-            return try await videoFrameExtractor.extractFrames(
+            let output = try await videoFrameExtractor.extractFrames(
                 from: videoURL,
-                sourceFPS: sourceFPS,
-                maxResolution: request.options.maxResolution
+                policy: GIFFrameExtractionPolicy(
+                    sourceFPS: sourceFPS,
+                    maxResolution: request.options.maxResolution,
+                    maxFrameCount: 150,
+                    decodeMemoryBudgetBytes: frameStorageMemoryBudgetBytes
+                )
             )
+            return output.frames
         case .livePhotoVideoFile(let videoURL, let sourceFPS):
-            return try await videoFrameExtractor.extractFrames(
+            let output = try await videoFrameExtractor.extractFrames(
                 from: videoURL,
-                sourceFPS: sourceFPS,
-                maxResolution: request.options.maxResolution
+                policy: GIFFrameExtractionPolicy(
+                    sourceFPS: sourceFPS,
+                    maxResolution: request.options.maxResolution,
+                    maxFrameCount: 150,
+                    decodeMemoryBudgetBytes: frameStorageMemoryBudgetBytes
+                )
             )
+            return output.frames
         }
     }
 }
@@ -441,25 +488,66 @@ internal struct GIFEncodingLive: GIFEncoding {
 internal struct GIFVideoFrameExtractorLive: GIFVideoFrameExtracting {
     func extractFrames(
         from videoURL: URL,
-        sourceFPS: Double?,
-        maxResolution: CGFloat
-    ) async throws -> [GIFImage] {
+        policy: GIFFrameExtractionPolicy
+    ) async throws -> GIFVideoExtractionOutput {
         let asset = AVURLAsset(url: videoURL)
         let duration = try await asset.load(.duration)
         let seconds = duration.seconds
         guard seconds > 0 else {
             throw GifError.unableToReadFile
         }
-        let videoTrack = try await asset.loadTracks(withMediaType: .video).first
-        let nominalFPS = try await Double(videoTrack?.load(.nominalFrameRate) ?? 0)
-        let extractionFPS = max(1, sourceFPS ?? nominalFPS)
-
-        let frameCount = min(Int(seconds * extractionFPS), 150)
-        if frameCount == 0 {
-            throw GifError.gifResultNil
+        guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
+            throw GifError.unableToReadFile
         }
-        if frameCount >= 150 {
-            throw GifError.tooManyFrames
+
+        let nominalFPS = max(1, try await Double(videoTrack.load(.nominalFrameRate)))
+        let naturalSize = try await videoTrack.load(.naturalSize)
+        let preferredTransform = try await videoTrack.load(.preferredTransform)
+        let transformedSize = naturalSize.applying(preferredTransform)
+        let sourceWidth = max(abs(transformedSize.width), 1)
+        let sourceHeight = max(abs(transformedSize.height), 1)
+        let sourceLongEdge = max(sourceWidth, sourceHeight)
+
+        var effectiveSourceFPS = max(1, policy.sourceFPS ?? nominalFPS)
+        let maxFrameCount = max(1, policy.maxFrameCount)
+        effectiveSourceFPS = min(effectiveSourceFPS, Double(maxFrameCount) / seconds)
+        effectiveSourceFPS = max(1, effectiveSourceFPS)
+
+        let maxLongEdge = max(1, min(policy.maxResolution, sourceLongEdge))
+        var effectiveLongEdge = maxLongEdge
+        let decodeBudgetBytes = max(1, policy.decodeMemoryBudgetBytes)
+
+        for _ in 0..<12 {
+            let frameCount = clampedFrameCount(
+                durationSeconds: seconds,
+                sourceFPS: effectiveSourceFPS,
+                maxFrameCount: maxFrameCount
+            )
+            let estimatedBytes = estimatedDecodeBytes(
+                frameCount: frameCount,
+                sourceSize: CGSize(width: sourceWidth, height: sourceHeight),
+                effectiveLongEdge: effectiveLongEdge
+            )
+            if estimatedBytes <= decodeBudgetBytes {
+                break
+            }
+
+            if effectiveSourceFPS > 6 {
+                effectiveSourceFPS = max(6, effectiveSourceFPS * 0.85)
+            } else if effectiveLongEdge > 120 {
+                effectiveLongEdge = max(120, effectiveLongEdge * 0.9)
+            } else {
+                break
+            }
+        }
+
+        let frameCount = clampedFrameCount(
+            durationSeconds: seconds,
+            sourceFPS: effectiveSourceFPS,
+            maxFrameCount: maxFrameCount
+        )
+        guard frameCount > 0 else {
+            throw GifError.gifResultNil
         }
 
         let generator = AVAssetImageGenerator(asset: asset)
@@ -469,9 +557,10 @@ internal struct GIFVideoFrameExtractorLive: GIFVideoFrameExtracting {
 
         var times: [NSValue] = []
         times.reserveCapacity(frameCount)
-        let step = 1.0 / extractionFPS
+        let step = seconds / Double(frameCount)
         for index in 0..<frameCount {
-            let value = CMTime(seconds: Double(index) * step, preferredTimescale: 600)
+            let secondsValue = min(Double(index) * step, max(seconds - 0.001, 0))
+            let value = CMTime(seconds: secondsValue, preferredTimescale: 600)
             times.append(NSValue(time: value))
         }
 
@@ -480,10 +569,45 @@ internal struct GIFVideoFrameExtractorLive: GIFVideoFrameExtracting {
         for time in times {
             try Task.checkCancellation()
             let cgImage = try generator.copyCGImage(at: time.timeValue, actualTime: nil)
-            let resized = GIFImage.gifImage(cgImage: cgImage).resize(width: maxResolution)
+            let resized = GIFImage.gifImage(cgImage: cgImage).resize(width: effectiveLongEdge)
             images.append(resized)
         }
-        return images
+        let estimatedBytes = estimatedDecodeBytes(
+            frameCount: frameCount,
+            sourceSize: CGSize(width: sourceWidth, height: sourceHeight),
+            effectiveLongEdge: effectiveLongEdge
+        )
+        return GIFVideoExtractionOutput(
+            frames: images,
+            effectiveSourceFPS: effectiveSourceFPS,
+            effectiveMaxResolution: effectiveLongEdge,
+            estimatedDecodeBytes: estimatedBytes
+        )
+    }
+
+    private func clampedFrameCount(
+        durationSeconds: Double,
+        sourceFPS: Double,
+        maxFrameCount: Int
+    ) -> Int {
+        let calculated = Int((durationSeconds * sourceFPS).rounded(.down))
+        return max(1, min(maxFrameCount, calculated))
+    }
+
+    private func estimatedDecodeBytes(
+        frameCount: Int,
+        sourceSize: CGSize,
+        effectiveLongEdge: CGFloat
+    ) -> Int {
+        let sourceLongEdge = max(sourceSize.width, sourceSize.height)
+        guard sourceLongEdge > 0 else {
+            return 0
+        }
+        let scale = min(1, effectiveLongEdge / sourceLongEdge)
+        let width = max(1, sourceSize.width * scale)
+        let height = max(1, sourceSize.height * scale)
+        let bytes = Double(frameCount) * Double(width * height * 4)
+        return Int(bytes.rounded(.up))
     }
 }
 

@@ -250,10 +250,15 @@ struct GIFToolKitImplTests {
         let photoLibrary = PhotoLibraryStub()
         let recommendations = RecommendationProviderStub()
 
-        extractor.onExtract = { _, _, _ in
+        extractor.onExtract = { _, _ in
             try await Task.sleep(for: .seconds(2))
             try Task.checkCancellation()
-            return []
+            return .init(
+                frames: [],
+                effectiveSourceFPS: 0,
+                effectiveMaxResolution: 0,
+                estimatedDecodeBytes: 0
+            )
         }
 
         let toolKit = makeToolKit(
@@ -555,22 +560,27 @@ private final class VideoFrameExtractorStub: GIFVideoFrameExtracting, @unchecked
     var lastVideoURL: URL?
     var lastSourceFPS: Double?
     var lastMaxResolution: CGFloat?
-    var onExtract: ((URL, Double?, CGFloat) async throws -> [GIFImage])?
+    var onExtract: ((URL, GIFFrameExtractionPolicy) async throws -> GIFVideoExtractionOutput)?
     private var didStart = false
     private var startContinuations: [CheckedContinuation<Void, Never>] = []
 
-    func extractFrames(from videoURL: URL, sourceFPS: Double?, maxResolution: CGFloat) async throws -> [GIFImage] {
+    func extractFrames(from videoURL: URL, policy: GIFFrameExtractionPolicy) async throws -> GIFVideoExtractionOutput {
         lastVideoURL = videoURL
-        lastSourceFPS = sourceFPS
-        lastMaxResolution = maxResolution
+        lastSourceFPS = policy.sourceFPS
+        lastMaxResolution = policy.maxResolution
         didStart = true
         let continuations = startContinuations
         startContinuations.removeAll()
         continuations.forEach { $0.resume() }
         if let onExtract {
-            return try await onExtract(videoURL, sourceFPS, maxResolution)
+            return try await onExtract(videoURL, policy)
         }
-        return outputImages
+        return GIFVideoExtractionOutput(
+            frames: outputImages,
+            effectiveSourceFPS: policy.sourceFPS ?? 0,
+            effectiveMaxResolution: policy.maxResolution,
+            estimatedDecodeBytes: 0
+        )
     }
 
     func waitUntilStarted() async {
