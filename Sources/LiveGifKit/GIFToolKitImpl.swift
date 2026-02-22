@@ -60,7 +60,7 @@ internal struct GIFFrameExtractionPolicy: Sendable {
     }
 }
 
-internal struct GIFVideoExtractionOutput: Sendable {
+internal struct GIFVideoExtractionOutput: @unchecked Sendable {
     let frames: [GIFImage]
     let effectiveSourceFPS: Double
     let effectiveMaxResolution: CGFloat
