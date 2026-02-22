@@ -152,10 +152,29 @@ final class LiveGIFDemoViewModel {
             } catch {
                 await MainActor.run {
                     saveStatus = "Failed"
-                    localErrorMessage = error.localizedDescription
+                    localErrorMessage = saveErrorMessage(for: error)
                 }
                 logger.error("Save GIF failed: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func saveErrorMessage(for error: Error) -> String {
+        guard let albumError = error as? AlbumToolError else {
+            return error.localizedDescription
+        }
+
+        switch albumError {
+        case .denied, .unAuthorized:
+            return "Photos access denied. Open System Settings > Privacy & Security > Photos, then allow GifDemo."
+        case .notDetermined:
+            return "Please allow Photos access when prompted, then try Save GIF again."
+        case .limited:
+            return "Photos access is limited. Please allow full access for saving GIF."
+        case .saveFail:
+            return "Failed to save GIF to Photos. Please try again."
+        case .unknown:
+            return "Unknown Photos error. Please retry."
         }
     }
 

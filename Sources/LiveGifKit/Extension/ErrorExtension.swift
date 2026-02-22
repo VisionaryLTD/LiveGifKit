@@ -31,3 +31,33 @@ public enum AlbumToolError: Error {
 }
 
 public typealias GIFError = GifError
+
+extension AlbumToolError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .denied:
+            return "Photos access is denied."
+        case .notDetermined:
+            return "Photos access is not determined yet."
+        case .saveFail:
+            return "Failed to save GIF to Photos."
+        case .limited:
+            return "Photos access is limited."
+        case .unAuthorized:
+            return "Photos access is unauthorized."
+        case .unknown:
+            return "An unknown Photos error occurred."
+        }
+    }
+
+    public var recoverySuggestion: String? {
+        switch self {
+        case .denied, .unAuthorized:
+            return "Allow Photos access in System Settings > Privacy & Security > Photos."
+        case .notDetermined:
+            return "Please try again and allow Photos access when prompted."
+        case .saveFail, .limited, .unknown:
+            return nil
+        }
+    }
+}
