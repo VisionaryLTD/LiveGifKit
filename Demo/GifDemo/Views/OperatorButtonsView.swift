@@ -21,7 +21,7 @@ struct OperatorButtonsView: View {
                 Button("Save GIF") {
                     viewModel.saveGIF()
                 }
-                .disabled(viewModel.generatedResult == nil)
+                .disabled(!viewModel.canSaveGIF)
 
                 Button("Cleanup") {
                     viewModel.cleanup()

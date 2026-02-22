@@ -26,49 +26,43 @@ final class LiveGIFDemoViewModel {
     }
 
     @ObservationIgnored @Dependency(\.gifToolKit) private var gifToolKit
-    @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var pickerTask: Task<Void, Never>?
-    @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var operationTask: Task<Void, Never>?
     @ObservationIgnored private let logger = Logger(subsystem: "LiveGIFKit.Demo", category: "ViewModel")
 
+    @ObservationIgnored lazy var session = GIFToolKitSession(gifToolKit: gifToolKit)
+
     var sourceMode: SourceMode = .livePhoto {
-        didSet { scheduleAutoGenerate() }
+        didSet {
+            applySessionSource()
+            if pickerItem != nil {
+                handlePickerChange()
+            }
+        }
     }
     var pickerItem: PhotosPickerItem?
     var sourceImageURL: URL?
     var sourceLivePhotoVideoURL: URL?
-    var generatedResult: GIFGenerationURLResult?
     var singleBackgroundRemovedImageURL: URL?
     var generatedFrameURLs: [URL] = []
     var recommendedAssets: [GIFRecommendedAsset] = []
     var isLoadingSource = false
     var isRemovingBackground = false
-    var removeBackground = false {
-        didSet { scheduleAutoGenerate() }
-    }
-    var outputFPS = 30.0 {
-        didSet { scheduleAutoGenerate() }
-    }
-    var sourceFPS = 15.0 {
-        didSet { scheduleAutoGenerate() }
-    }
     var showRecommendations = false
     var showFrames = false
-    var watermarkText = "" {
-        didSet { scheduleAutoGenerate() }
-    }
-    var watermarkLocation: GIFWatermarkPosition = .center {
-        didSet { scheduleAutoGenerate() }
-    }
     var saveStatus = ""
-    var isGenerating = false
-    var generationProgress: Double?
-    var generationStatus = "Idle"
-    var lastErrorMessage = ""
+    var localErrorMessage = ""
+
+    var generatedResult: GIFGenerationURLResult? {
+        session.generationResult
+    }
 
     var canGenerate: Bool {
-        currentSource() != nil
+        session.attributes.source != nil
+    }
+
+    var canSaveGIF: Bool {
+        canGenerate
     }
 
     var canRemoveBackground: Bool {
@@ -76,14 +70,14 @@ final class LiveGIFDemoViewModel {
     }
 
     var isProgressVisible: Bool {
-        isLoadingSource || isGenerating || isRemovingBackground
+        isLoadingSource || session.isGenerating || isRemovingBackground
     }
 
     func warmUp() {
         operationTask?.cancel()
-        operationTask = Task { [gifToolKit, logger] in
+        operationTask = Task { [logger] in
             logger.info("Preheat start")
-            try? await gifToolKit.preheat()
+            try? await session.preheat()
             logger.info("Preheat end")
         }
     }
@@ -92,6 +86,7 @@ final class LiveGIFDemoViewModel {
         guard let pickerItem else {
             sourceImageURL = nil
             sourceLivePhotoVideoURL = nil
+            applySessionSource()
             return
         }
 
@@ -100,7 +95,7 @@ final class LiveGIFDemoViewModel {
             guard let self else { return }
             await MainActor.run {
                 isLoadingSource = true
-                lastErrorMessage = ""
+                localErrorMessage = ""
             }
             defer {
                 Task { @MainActor in
@@ -121,98 +116,43 @@ final class LiveGIFDemoViewModel {
                 await MainActor.run {
                     sourceImageURL = imageURL
                     sourceLivePhotoVideoURL = livePhotoVideoURL
-                    generatedResult = nil
                     singleBackgroundRemovedImageURL = nil
                     generatedFrameURLs = []
                     if sourceMode == .livePhoto && livePhotoVideoURL == nil {
-                        lastErrorMessage = "Failed to load live photo video resource."
+                        localErrorMessage = "Failed to load live photo video resource."
                     } else {
-                        scheduleAutoGenerate()
+                        localErrorMessage = ""
                     }
+                    applySessionSource()
                 }
             } catch {
                 await MainActor.run {
-                    lastErrorMessage = error.localizedDescription
+                    localErrorMessage = error.localizedDescription
                 }
                 logger.error("Picker load failed: \(error.localizedDescription)")
             }
         }
     }
 
-    func generateGIF() {
-        guard let source = currentSource() else {
-            return
-        }
-
-        generationTask?.cancel()
-        let request = GIFGenerationURLRequest(
-            source: source,
-            options: GIFGenerationOptions(
-                outputFPS: outputFPS,
-                maxResolution: 500,
-                removeBackground: removeBackground,
-                watermarks: makeWatermarks()
-            )
-        )
-
-        generationTask = Task(priority: .userInitiated) { [gifToolKit, logger] in
-            do {
-                isGenerating = true
-                generationProgress = nil
-                generationStatus = "Preparing"
-
-                for try await event in gifToolKit.generateGIF(request) {
-                    try Task.checkCancellation()
-                    switch event {
-                    case .preparingFrames(let completed, let total):
-                        generationStatus = "Preparing Frames"
-                        generationProgress = progress(completed: completed, total: total)
-                    case .encoding(let completed, let total):
-                        generationStatus = "Encoding GIF"
-                        generationProgress = progress(completed: completed, total: total)
-                    case .completed(let result):
-                        generatedResult = result
-                        singleBackgroundRemovedImageURL = nil
-                        generatedFrameURLs = []
-                        saveStatus = ""
-                        lastErrorMessage = ""
-                    }
-                }
-
-                isGenerating = false
-                generationStatus = "Idle"
-                logger.info("Generate GIF done")
-            } catch is CancellationError {
-                isGenerating = false
-                generationStatus = "Idle"
-            } catch {
-                isGenerating = false
-                generationStatus = "Failed"
-                lastErrorMessage = error.localizedDescription
-                logger.error("Generate GIF failed: \(error.localizedDescription)")
-            }
-        }
-    }
-
     func saveGIF() {
-        guard let generatedResult else {
+        guard canSaveGIF else {
             return
         }
 
         operationTask?.cancel()
-        operationTask = Task { [gifToolKit, logger] in
+        operationTask = Task { [logger] in
             do {
                 logger.info("Save GIF start")
-                _ = try await gifToolKit.save(.init(payload: .fileURL(generatedResult.gifURL)))
+                _ = try await session.saveLatestGIF()
                 await MainActor.run {
                     saveStatus = "Saved"
-                    lastErrorMessage = ""
+                    localErrorMessage = ""
                 }
                 logger.info("Save GIF success")
             } catch {
                 await MainActor.run {
                     saveStatus = "Failed"
-                    lastErrorMessage = error.localizedDescription
+                    localErrorMessage = error.localizedDescription
                 }
                 logger.error("Save GIF failed: \(error.localizedDescription)")
             }
@@ -225,42 +165,33 @@ final class LiveGIFDemoViewModel {
         }
 
         operationTask?.cancel()
-        operationTask = Task { [gifToolKit, logger] in
+        operationTask = Task { [logger] in
             do {
                 await MainActor.run {
                     isRemovingBackground = true
-                    generationStatus = "Removing Background"
                 }
 
-                let stream = gifToolKit.removeBackground(
+                let stream = session.removeBackground(
                     .init(inputImageURL: sourceImageURL)
                 )
                 for try await event in stream {
-                    switch event {
-                    case .processing:
+                    if case .completed(let result) = event {
                         await MainActor.run {
-                            generationProgress = nil
-                        }
-                    case .completed(let result):
-                        await MainActor.run {
-                            generatedResult = nil
                             singleBackgroundRemovedImageURL = result.imageURL
                             generatedFrameURLs = []
-                            lastErrorMessage = ""
+                            localErrorMessage = ""
                         }
                     }
                 }
 
                 await MainActor.run {
                     isRemovingBackground = false
-                    generationStatus = "Idle"
                 }
                 logger.info("Single image remove background done")
             } catch {
                 await MainActor.run {
                     isRemovingBackground = false
-                    generationStatus = "Failed"
-                    lastErrorMessage = error.localizedDescription
+                    localErrorMessage = error.localizedDescription
                 }
                 logger.error("Single image remove background failed: \(error.localizedDescription)")
             }
@@ -269,19 +200,19 @@ final class LiveGIFDemoViewModel {
 
     func loadRecommendations() {
         operationTask?.cancel()
-        operationTask = Task { [gifToolKit, logger] in
+        operationTask = Task { [logger] in
             do {
                 logger.info("Recommendations start")
-                let assets = try await gifToolKit.fetchRecommendedAssets(.init(days: 30))
+                let assets = try await session.fetchRecommendedAssets(.init(days: 30))
                 await MainActor.run {
                     recommendedAssets = assets
                     showRecommendations = true
-                    lastErrorMessage = ""
+                    localErrorMessage = ""
                 }
                 logger.info("Recommendations done: \(assets.count)")
             } catch {
                 await MainActor.run {
-                    lastErrorMessage = error.localizedDescription
+                    localErrorMessage = error.localizedDescription
                 }
                 logger.error("Recommendations failed: \(error.localizedDescription)")
             }
@@ -289,7 +220,7 @@ final class LiveGIFDemoViewModel {
     }
 
     func showFramesSheet() {
-        guard let generatedResult else {
+        guard !session.previewFrameURLs.isEmpty || generatedResult != nil else {
             return
         }
 
@@ -297,7 +228,9 @@ final class LiveGIFDemoViewModel {
         operationTask = Task { [logger] in
             do {
                 let frameURLs: [URL]
-                if generatedFrameURLs.isEmpty {
+                if !session.previewFrameURLs.isEmpty {
+                    frameURLs = session.previewFrameURLs
+                } else if let generatedResult, generatedFrameURLs.isEmpty {
                     frameURLs = try extractFrameURLs(from: generatedResult.gifURL)
                 } else {
                     frameURLs = generatedFrameURLs
@@ -308,7 +241,7 @@ final class LiveGIFDemoViewModel {
                 }
             } catch {
                 await MainActor.run {
-                    lastErrorMessage = error.localizedDescription
+                    localErrorMessage = error.localizedDescription
                 }
                 logger.error("Load frame previews failed: \(error.localizedDescription)")
             }
@@ -317,62 +250,34 @@ final class LiveGIFDemoViewModel {
 
     func cleanup() {
         operationTask?.cancel()
-        operationTask = Task { [gifToolKit, logger] in
+        operationTask = Task { [logger] in
             logger.info("Cleanup start")
-            try? await gifToolKit.cleanup(.allTemporaryGIFFiles)
+            try? await session.cleanup(.allTemporaryGIFFiles)
             await MainActor.run {
                 generatedFrameURLs = []
+                singleBackgroundRemovedImageURL = nil
             }
             logger.info("Cleanup end")
         }
     }
 
-    private func scheduleAutoGenerate() {
-        guard canGenerate else {
-            return
-        }
-
-        debounceTask?.cancel()
-        debounceTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else {
-                return
-            }
-            generateGIF()
-        }
-    }
-
-    private func currentSource() -> GIFGenerationURLSource? {
+    private func applySessionSource() {
+        var attributes = session.attributes
         switch sourceMode {
         case .image:
-            guard let sourceImageURL else {
-                return nil
+            if let sourceImageURL {
+                attributes.source = .imageFiles([sourceImageURL], adjustOrientation: true)
+            } else {
+                attributes.source = nil
             }
-            return .imageFiles([sourceImageURL], adjustOrientation: true)
         case .livePhoto:
-            guard let sourceLivePhotoVideoURL else {
-                return nil
+            if let sourceLivePhotoVideoURL {
+                attributes.source = .livePhotoVideoFile(sourceLivePhotoVideoURL)
+            } else {
+                attributes.source = nil
             }
-            return .livePhotoVideoFile(sourceLivePhotoVideoURL, sourceFPS: sourceFPS)
         }
-    }
-
-    private func makeWatermarks() -> [GIFWatermark] {
-        guard !watermarkText.isEmpty else {
-            return []
-        }
-
-        return [
-            GIFWatermark(
-                content: .text(
-                    watermarkText,
-                    font: .systemFont(ofSize: 26),
-                    textColor: .red,
-                    backgroundColor: .clear
-                ),
-                position: watermarkLocation
-            ),
-        ]
+        session.attributes = attributes
     }
 
     private func loadImageURL(from item: PhotosPickerItem) async throws -> URL? {
@@ -542,13 +447,6 @@ final class LiveGIFDemoViewModel {
                 return lhsSize > rhsSize
             }
         }
-    }
-
-    private func progress(completed: Int, total: Int?) -> Double? {
-        guard let total, total > 0 else {
-            return nil
-        }
-        return min(max(Double(completed) / Double(total), 0), 1)
     }
 
     private func demoDirectory() throws -> URL {

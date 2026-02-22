@@ -1,10 +1,10 @@
 import LiveGifKit
 import PhotosUI
-import SDWebImageSwiftUI
 import SwiftUI
 
 struct MainView: View {
     @Environment(LiveGIFDemoViewModel.self) private var viewModel
+    @Environment(GIFToolKitSession.self) private var session
 
     var body: some View {
         NavigationStack {
@@ -51,17 +51,17 @@ struct MainView: View {
 
     private var controlsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Remove Background", isOn: Bindable(viewModel).removeBackground)
+            Toggle("Remove Background", isOn: removeBackgroundBinding)
 
-            LabeledContent("Source FPS: \(Int(viewModel.sourceFPS))") {
-                Slider(value: Bindable(viewModel).sourceFPS, in: 5...60, step: 1)
+            LabeledContent("Source FPS: \(Int(session.attributes.sourceFPS))") {
+                Slider(value: sourceFPSBinding, in: 5...60, step: 1)
             }
 
-            LabeledContent("Output GIF FPS: \(Int(viewModel.outputFPS))") {
-                Slider(value: Bindable(viewModel).outputFPS, in: 5...60, step: 1)
+            LabeledContent("Output GIF FPS: \(Int(session.attributes.outputFPS))") {
+                Slider(value: outputFPSBinding, in: 5...60, step: 1)
             }
 
-            Text(viewModel.isGenerating ? "Updating preview…" : "Preview updates automatically")
+            Text(session.isGenerating ? "Updating preview…" : "Preview updates automatically")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -74,13 +74,17 @@ struct MainView: View {
                 Text("Result")
                     .font(.headline)
 
-                ProgressView(value: viewModel.generationProgress)
+                ProgressView(value: session.generationProgress)
                     .controlSize(.small)
                     .frame(width: 80)
                     .opacity(viewModel.isProgressVisible ? 1 : 0)
 
                 if viewModel.isProgressVisible {
-                    Text(viewModel.generationStatus)
+                    Text(
+                        session.isPreparingPreview
+                            ? session.previewStatus
+                            : session.generationStatus
+                    )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
@@ -90,29 +94,34 @@ struct MainView: View {
                 }
             }
 
-            if let result = viewModel.generatedResult {
-                previewContainer {
-                    if let data = result.data {
-                        AnimatedImage(data: data)
-                            .resizable()
-                    } else {
-                        Text("Failed to load GIF data")
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            #if DEBUG
+            Text(
+                "Memory \(session.memoryTelemetry.residentMB, format: .number.precision(.fractionLength(1)))MB, Peak \(session.memoryTelemetry.peakResidentMB, format: .number.precision(.fractionLength(1)))MB"
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            #endif
 
-                HStack {
-                    Text("Frames: \(result.frameCount)")
-                    Spacer()
-                    Button("View Frames") {
-                        viewModel.showFramesSheet()
-                    }
-                }
-            } else if let imageURL = viewModel.singleBackgroundRemovedImageURL {
+            if let imageURL = viewModel.singleBackgroundRemovedImageURL {
                 previewContainer {
                     if let image = platformImage(for: imageURL) {
                         image
                             .resizable()
+                    }
+                }
+            } else if !session.previewFrameURLs.isEmpty {
+                previewContainer {
+                    GIFFrameLoopPreview(
+                        frameURLs: session.previewFrameURLs,
+                        fps: session.attributes.outputFPS
+                    )
+                }
+
+                HStack {
+                    Text("Frames: \(session.previewFrameURLs.count)")
+                    Spacer()
+                    Button("View Frames") {
+                        viewModel.showFramesSheet()
                     }
                 }
             } else {
@@ -121,16 +130,52 @@ struct MainView: View {
             }
         }
 
-        if !viewModel.lastErrorMessage.isEmpty {
-            Text(viewModel.lastErrorMessage)
+        if !viewModel.localErrorMessage.isEmpty {
+            Text(viewModel.localErrorMessage)
+                .foregroundStyle(.red)
+        } else if !session.lastErrorMessage.isEmpty {
+            Text(session.lastErrorMessage)
                 .foregroundStyle(.red)
         }
     }
 
+    private var removeBackgroundBinding: Binding<Bool> {
+        Binding(
+            get: { session.attributes.removeBackground },
+            set: { newValue in
+                var attributes = session.attributes
+                attributes.removeBackground = newValue
+                session.attributes = attributes
+            }
+        )
+    }
+
+    private var sourceFPSBinding: Binding<Double> {
+        Binding(
+            get: { session.attributes.sourceFPS },
+            set: { newValue in
+                var attributes = session.attributes
+                attributes.sourceFPS = newValue
+                session.attributes = attributes
+            }
+        )
+    }
+
+    private var outputFPSBinding: Binding<Double> {
+        Binding(
+            get: { session.attributes.outputFPS },
+            set: { newValue in
+                var attributes = session.attributes
+                attributes.outputFPS = newValue
+                session.attributes = attributes
+            }
+        )
+    }
+
     private var previewAspectRatio: CGFloat {
-        if let result = viewModel.generatedResult {
-            let width = max(result.pixelSize.width, 1)
-            let height = max(result.pixelSize.height, 1)
+        if let previewPixelSize = session.previewPixelSize {
+            let width = max(previewPixelSize.width, 1)
+            let height = max(previewPixelSize.height, 1)
             return width / height
         }
 
