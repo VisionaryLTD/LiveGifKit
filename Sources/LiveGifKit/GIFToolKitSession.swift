@@ -22,26 +22,50 @@ public struct GIFEditorAttributes: Sendable, Hashable {
     public var outputFPS: Double
     public var sourceFPS: Double
     public var maxResolution: CGFloat
+    public var maxFrameCount: Int
+    public var decodeMemoryBudgetMB: Int
     public var removeBackground: Bool
+    public var enableAutoSubjectFraming: Bool
+    public var subjectTargetFillRatio: Double
+    public var subjectPaddingRatio: Double
+    public var subjectMaxUpscale: Double
     public var watermarkText: String
     public var watermarkPosition: GIFWatermarkPosition
+    public var exportMaxLongEdge: CGFloat?
+    public var exportMaxFileSizeBytes: Int?
 
     public init(
         source: Source? = nil,
         outputFPS: Double = 30,
         sourceFPS: Double = 15,
         maxResolution: CGFloat = 500,
+        maxFrameCount: Int = 150,
+        decodeMemoryBudgetMB: Int = 64,
         removeBackground: Bool = false,
+        enableAutoSubjectFraming: Bool = true,
+        subjectTargetFillRatio: Double = 0.70,
+        subjectPaddingRatio: Double = 0.08,
+        subjectMaxUpscale: Double = 2.0,
         watermarkText: String = "",
-        watermarkPosition: GIFWatermarkPosition = .center
+        watermarkPosition: GIFWatermarkPosition = .center,
+        exportMaxLongEdge: CGFloat? = nil,
+        exportMaxFileSizeBytes: Int? = nil
     ) {
         self.source = source
         self.outputFPS = outputFPS
         self.sourceFPS = sourceFPS
         self.maxResolution = maxResolution
+        self.maxFrameCount = max(1, maxFrameCount)
+        self.decodeMemoryBudgetMB = max(1, decodeMemoryBudgetMB)
         self.removeBackground = removeBackground
+        self.enableAutoSubjectFraming = enableAutoSubjectFraming
+        self.subjectTargetFillRatio = subjectTargetFillRatio
+        self.subjectPaddingRatio = subjectPaddingRatio
+        self.subjectMaxUpscale = subjectMaxUpscale
         self.watermarkText = watermarkText
         self.watermarkPosition = watermarkPosition
+        self.exportMaxLongEdge = exportMaxLongEdge
+        self.exportMaxFileSizeBytes = exportMaxFileSizeBytes
     }
 }
 
@@ -88,6 +112,14 @@ public final class GIFToolKitSession {
     public private(set) var isGenerating: Bool
     public private(set) var lastErrorMessage: String
     public private(set) var memoryTelemetry: GIFSessionMemoryTelemetry
+    public private(set) var lastEffectiveSourceFPS: Double?
+    public private(set) var lastEffectiveMaxResolution: CGFloat?
+    public private(set) var lastEstimatedDecodeBytes: Int?
+    public private(set) var lastExportFileSizeBytes: Int?
+    public private(set) var lastExportPixelSize: CGSize?
+    public private(set) var lastExportFPS: Double?
+    public private(set) var lastExportPassCount: Int
+    public private(set) var lastExportStatus: String
 
     public private(set) var previewFrameURLs: [URL]
     public private(set) var previewPixelSize: CGSize?
@@ -165,6 +197,14 @@ public final class GIFToolKitSession {
         isGenerating = false
         lastErrorMessage = ""
         memoryTelemetry = GIFSessionMemoryTelemetry(residentMB: 0, peakResidentMB: 0)
+        lastEffectiveSourceFPS = nil
+        lastEffectiveMaxResolution = nil
+        lastEstimatedDecodeBytes = nil
+        lastExportFileSizeBytes = nil
+        lastExportPixelSize = nil
+        lastExportFPS = nil
+        lastExportPassCount = 0
+        lastExportStatus = "Idle"
 
         previewFrameURLs = []
         previewPixelSize = nil
@@ -207,6 +247,7 @@ public final class GIFToolKitSession {
         generationProgress = nil
         generationState = .idle
         previewState = .idle
+        lastExportStatus = "Idle"
     }
 
     public func saveLatestGIF(
@@ -221,6 +262,11 @@ public final class GIFToolKitSession {
         generationProgress = nil
         generationState = .waitingPreview
         lastErrorMessage = ""
+        lastExportFileSizeBytes = nil
+        lastExportPixelSize = nil
+        lastExportFPS = nil
+        lastExportPassCount = 0
+        lastExportStatus = "Idle"
         recordMemorySnapshot(reason: "save-start")
         defer {
             isSavingGIF = false
@@ -237,18 +283,21 @@ public final class GIFToolKitSession {
         let previewEntry = try await ensurePreviewReady(for: prepared)
         generationState = .encodingGIF
 
-        let saveKey = prepared.key.fileStem + "-fps-\(normalize(attributes.outputFPS))"
-        let outputURL = generatedDirectory.appending(path: "\(saveKey).gif")
-        let result = try await encodeFinalGIF(
+        let saveKey = prepared.key.fileStem
+        let export = try await encodeFinalGIFWithBudget(
             from: previewEntry.frameURLs,
-            outputURL: outputURL,
-            outputFPS: attributes.outputFPS
+            saveKey: saveKey
         )
-        generationResult = result
+        generationResult = export.result
+        lastExportFileSizeBytes = export.fileSizeBytes
+        lastExportPixelSize = export.result.pixelSize
+        lastExportFPS = export.outputFPS
+        lastExportPassCount = export.passCount
+        lastExportStatus = export.status
 
         return try await gifToolKit.save(
             GIFSaveURLRequest(
-                payload: .fileURL(result.gifURL),
+                payload: .fileURL(export.result.gifURL),
                 destination: destination
             )
         )
@@ -284,6 +333,14 @@ public final class GIFToolKitSession {
             previewFrameURLs = []
             previewPixelSize = nil
             generationResult = nil
+            lastEffectiveSourceFPS = nil
+            lastEffectiveMaxResolution = nil
+            lastEstimatedDecodeBytes = nil
+            lastExportFileSizeBytes = nil
+            lastExportPixelSize = nil
+            lastExportFPS = nil
+            lastExportPassCount = 0
+            lastExportStatus = "Idle"
             try? FileManager.default.removeItem(at: sessionDirectory)
             try FileManager.default.createDirectory(at: previewDirectory, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: generatedDirectory, withIntermediateDirectories: true)
@@ -304,6 +361,9 @@ private extension GIFToolKitSession {
             previewTaskKey = nil
             previewFrameURLs = []
             previewPixelSize = nil
+            lastEffectiveSourceFPS = nil
+            lastEffectiveMaxResolution = nil
+            lastEstimatedDecodeBytes = nil
             isPreparingPreview = false
             previewState = .idle
             if !isSavingGIF {
@@ -480,6 +540,9 @@ private extension GIFToolKitSession {
             bytesOnDisk: output.bytesOnDisk,
             lastAccess: Date()
         )
+        lastEffectiveSourceFPS = output.extractionSummary?.effectiveSourceFPS
+        lastEffectiveMaxResolution = output.extractionSummary?.effectiveMaxResolution
+        lastEstimatedDecodeBytes = output.extractionSummary?.estimatedDecodeBytes
         previewCache[key] = entry
         touchPreviewLRU(for: key)
         trimPreviewCacheIfNeeded(keeping: key)
@@ -539,26 +602,121 @@ private extension GIFToolKitSession.PreviewState {
 // MARK: - Save Encoding
 
 private extension GIFToolKitSession {
+    func encodeFinalGIFWithBudget(
+        from frameURLs: [URL],
+        saveKey: String
+    ) async throws -> GIFEncodedExport {
+        let maxFileSizeBytes = attributes.exportMaxFileSizeBytes
+        let maxLongEdge = attributes.exportMaxLongEdge
+        var outputFPS = max(1, attributes.outputFPS)
+        var longEdge = maxLongEdge
+        var frameStride = 1
+        let hasBudget = maxFileSizeBytes != nil || maxLongEdge != nil
+
+        for passIndex in 1...20 {
+            let outputURL = generatedDirectory.appending(path: "\(saveKey)-pass-\(passIndex).gif")
+            let result = try await encodeFinalGIF(
+                from: frameURLs,
+                outputURL: outputURL,
+                outputFPS: outputFPS,
+                maxLongEdge: longEdge,
+                frameStride: frameStride
+            )
+            let fileSizeBytes = gifFileSize(for: result.gifURL)
+            let resultLongEdge = max(result.pixelSize.width, result.pixelSize.height)
+
+            let meetsFileSize = maxFileSizeBytes.map { fileSizeBytes <= $0 } ?? true
+            let meetsResolution = maxLongEdge.map { resultLongEdge <= $0 + 0.5 } ?? true
+            if meetsFileSize, meetsResolution {
+                let status = hasBudget ? "FitInBudget" : "Unconstrained"
+                return GIFEncodedExport(
+                    result: result,
+                    fileSizeBytes: fileSizeBytes,
+                    outputFPS: outputFPS,
+                    passCount: passIndex,
+                    status: status
+                )
+            }
+
+            if outputFPS > 6 {
+                let nextFPS = max(6, (outputFPS * 0.85).rounded(.down))
+                if nextFPS < outputFPS {
+                    outputFPS = nextFPS
+                    continue
+                }
+            }
+
+            if let currentLongEdge = longEdge, currentLongEdge > 160 {
+                let nextLongEdge = max(160, (currentLongEdge * 0.85).rounded(.down))
+                if nextLongEdge < currentLongEdge {
+                    longEdge = nextLongEdge
+                    continue
+                }
+            } else if longEdge == nil, resultLongEdge > 160 {
+                longEdge = max(160, (resultLongEdge * 0.85).rounded(.down))
+                continue
+            }
+
+            if frameStride < 4 {
+                frameStride += 1
+                continue
+            }
+
+            lastExportStatus = "HitMinQuality"
+            throw GIFExportError.unableToFitBudget(
+                fileSizeBytes: fileSizeBytes,
+                maxFileSizeBytes: maxFileSizeBytes,
+                longEdge: resultLongEdge,
+                maxLongEdge: maxLongEdge,
+                outputFPS: outputFPS,
+                frameStride: frameStride
+            )
+        }
+
+        lastExportStatus = "HitMinQuality"
+        throw GIFExportError.unableToFitBudget(
+            fileSizeBytes: 0,
+            maxFileSizeBytes: maxFileSizeBytes,
+            longEdge: 0,
+            maxLongEdge: maxLongEdge,
+            outputFPS: outputFPS,
+            frameStride: frameStride
+        )
+    }
+
     func encodeFinalGIF(
         from frameURLs: [URL],
         outputURL: URL,
-        outputFPS: Double
+        outputFPS: Double,
+        maxLongEdge: CGFloat?,
+        frameStride: Int
     ) async throws -> GIFGenerationURLResult {
         #if DEBUG
         finalEncodeCount += 1
         #endif
 
-        let frameDelay = 1.0 / max(outputFPS, 1)
         let encoder = encoding
 
         return try await Task.detached(priority: .userInitiated) {
             try GIFFinalEncodePipeline.encode(
                 frameURLs: frameURLs,
                 outputURL: outputURL,
-                frameDelay: frameDelay,
+                outputFPS: outputFPS,
+                maxLongEdge: maxLongEdge,
+                frameStride: frameStride,
                 encoding: encoder
             )
         }.value
+    }
+
+    func gifFileSize(for fileURL: URL) -> Int {
+        guard
+            let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+            let bytes = values.fileSize
+        else {
+            return 0
+        }
+        return bytes
     }
 }
 
@@ -600,7 +758,13 @@ private extension GIFToolKitSession {
         let key = GIFPreviewCacheKey(
             source: keySource,
             maxResolution: normalize(attributes.maxResolution),
+            maxFrameCount: attributes.maxFrameCount,
+            decodeMemoryBudgetMB: attributes.decodeMemoryBudgetMB,
             removeBackground: attributes.removeBackground,
+            enableAutoSubjectFraming: attributes.enableAutoSubjectFraming,
+            subjectTargetFillRatio: normalize(attributes.subjectTargetFillRatio),
+            subjectPaddingRatio: normalize(attributes.subjectPaddingRatio),
+            subjectMaxUpscale: normalize(attributes.subjectMaxUpscale),
             watermarkText: attributes.watermarkText,
             watermarkPosition: attributes.watermarkPosition
         )
@@ -610,7 +774,15 @@ private extension GIFToolKitSession {
             key: key,
             source: requestSource,
             maxResolution: attributes.maxResolution,
+            maxFrameCount: attributes.maxFrameCount,
+            decodeMemoryBudgetMB: attributes.decodeMemoryBudgetMB,
             removeBackground: attributes.removeBackground,
+            autoSubjectFraming: GIFAutoSubjectFramingConfig(
+                isEnabled: attributes.enableAutoSubjectFraming,
+                targetFillRatio: attributes.subjectTargetFillRatio,
+                paddingRatio: attributes.subjectPaddingRatio,
+                maxUpscale: attributes.subjectMaxUpscale
+            ),
             watermarks: makeWatermarks(),
             frameDirectory: frameDirectory
         )
@@ -781,7 +953,10 @@ private struct GIFPreparedPreviewRequest: Sendable {
     let key: GIFPreviewCacheKey
     let source: GIFGenerationURLSource
     let maxResolution: CGFloat
+    let maxFrameCount: Int
+    let decodeMemoryBudgetMB: Int
     let removeBackground: Bool
+    let autoSubjectFraming: GIFAutoSubjectFramingConfig
     let watermarks: [GIFWatermark]
     let frameDirectory: URL
 }
@@ -791,6 +966,7 @@ private struct GIFPreparedPreviewOutput: Sendable {
     let pixelSize: CGSize
     let framesDirectory: URL
     let bytesOnDisk: Int
+    let extractionSummary: GIFExtractionSummary?
 }
 
 private struct GIFPreviewCacheEntry: Sendable {
@@ -799,6 +975,57 @@ private struct GIFPreviewCacheEntry: Sendable {
     let pixelSize: CGSize
     let bytesOnDisk: Int
     var lastAccess: Date
+}
+
+private struct GIFEncodedExport: Sendable {
+    let result: GIFGenerationURLResult
+    let fileSizeBytes: Int
+    let outputFPS: Double
+    let passCount: Int
+    let status: String
+}
+
+private enum GIFExportError: LocalizedError {
+    case unableToFitBudget(
+        fileSizeBytes: Int,
+        maxFileSizeBytes: Int?,
+        longEdge: CGFloat,
+        maxLongEdge: CGFloat?,
+        outputFPS: Double,
+        frameStride: Int
+    )
+
+    var errorDescription: String? {
+        switch self {
+        case let .unableToFitBudget(fileSizeBytes, maxFileSizeBytes, longEdge, maxLongEdge, outputFPS, frameStride):
+            let filePart: String
+            if let maxFileSizeBytes {
+                filePart = "file \(fileSizeBytes)B > limit \(maxFileSizeBytes)B"
+            } else {
+                filePart = "file \(fileSizeBytes)B"
+            }
+            let edgePart: String
+            if let maxLongEdge {
+                edgePart = "longEdge \(Int(longEdge))px > limit \(Int(maxLongEdge))px"
+            } else {
+                edgePart = "longEdge \(Int(longEdge))px"
+            }
+            return "Unable to fit GIF budget (\(filePart), \(edgePart), fps \(Int(outputFPS)), stride \(frameStride)."
+        }
+    }
+}
+
+private struct GIFAutoSubjectFramingConfig: Sendable {
+    let isEnabled: Bool
+    let targetFillRatio: Double
+    let paddingRatio: Double
+    let maxUpscale: Double
+}
+
+private struct GIFExtractionSummary: Sendable {
+    let effectiveSourceFPS: Double
+    let effectiveMaxResolution: CGFloat
+    let estimatedDecodeBytes: Int
 }
 
 private enum GIFPreviewKeySource: Hashable {
@@ -821,7 +1048,13 @@ private enum GIFPreviewKeySource: Hashable {
 private struct GIFPreviewCacheKey: Hashable {
     let source: GIFPreviewKeySource
     let maxResolution: Int
+    let maxFrameCount: Int
+    let decodeMemoryBudgetMB: Int
     let removeBackground: Bool
+    let enableAutoSubjectFraming: Bool
+    let subjectTargetFillRatio: Int
+    let subjectPaddingRatio: Int
+    let subjectMaxUpscale: Int
     let watermarkText: String
     let watermarkPosition: GIFWatermarkPosition
 
@@ -829,7 +1062,13 @@ private struct GIFPreviewCacheKey: Hashable {
         let raw = [
             source.stableString,
             "res:\(maxResolution)",
+            "frame:\(maxFrameCount)",
+            "mem:\(decodeMemoryBudgetMB)",
             "bg:\(removeBackground)",
+            "framing:\(enableAutoSubjectFraming)",
+            "fill:\(subjectTargetFillRatio)",
+            "pad:\(subjectPaddingRatio)",
+            "up:\(subjectMaxUpscale)",
             "wt:\(watermarkText)",
             "wp:\(watermarkPosition.rawValue)",
         ].joined(separator: "|")
@@ -849,10 +1088,11 @@ private enum GIFPreviewPipeline {
         }
         try FileManager.default.createDirectory(at: request.frameDirectory, withIntermediateDirectories: true)
 
-        let sourceImages = try await sourceImages(
+        let source = try await sourceImages(
             from: request,
             videoFrameExtractor: videoFrameExtractor
         )
+        let sourceImages = source.images
         guard !sourceImages.isEmpty else {
             throw GifError.gifResultNil
         }
@@ -864,6 +1104,13 @@ private enum GIFPreviewPipeline {
 
         if request.removeBackground {
             cgImages = try await backgroundRemover.removeBackground(images: cgImages)
+        }
+
+        if request.removeBackground, request.autoSubjectFraming.isEnabled {
+            cgImages = applyAutoSubjectFraming(
+                to: cgImages,
+                config: request.autoSubjectFraming
+            )
         }
 
         var frameURLs: [URL] = []
@@ -896,14 +1143,15 @@ private enum GIFPreviewPipeline {
             frameURLs: frameURLs,
             pixelSize: pixelSize,
             framesDirectory: request.frameDirectory,
-            bytesOnDisk: bytesOnDisk
+            bytesOnDisk: bytesOnDisk,
+            extractionSummary: source.extractionSummary
         )
     }
 
     private static func sourceImages(
         from request: GIFPreparedPreviewRequest,
         videoFrameExtractor: any GIFVideoFrameExtracting
-    ) async throws -> [GIFImage] {
+    ) async throws -> (images: [GIFImage], extractionSummary: GIFExtractionSummary?) {
         switch request.source {
         case .imageFiles(let urls, let adjustOrientation):
             var images: [GIFImage] = []
@@ -915,19 +1163,135 @@ private enum GIFPreviewPipeline {
                 let oriented = adjustOrientation ? image.adjustOrientation() : image
                 images.append(oriented.resize(width: request.maxResolution))
             }
-            return images
+            return (images, nil)
         case .videoFile(let videoURL, let sourceFPS):
-            return try await videoFrameExtractor.extractFrames(
+            let output = try await videoFrameExtractor.extractFrames(
                 from: videoURL,
-                sourceFPS: sourceFPS,
-                maxResolution: request.maxResolution
+                policy: GIFFrameExtractionPolicy(
+                    sourceFPS: sourceFPS,
+                    maxResolution: request.maxResolution,
+                    maxFrameCount: request.maxFrameCount,
+                    decodeMemoryBudgetBytes: request.decodeMemoryBudgetMB * 1024 * 1024
+                )
+            )
+            return (
+                output.frames,
+                GIFExtractionSummary(
+                    effectiveSourceFPS: output.effectiveSourceFPS,
+                    effectiveMaxResolution: output.effectiveMaxResolution,
+                    estimatedDecodeBytes: output.estimatedDecodeBytes
+                )
             )
         case .livePhotoVideoFile(let videoURL, let sourceFPS):
-            return try await videoFrameExtractor.extractFrames(
+            let output = try await videoFrameExtractor.extractFrames(
                 from: videoURL,
-                sourceFPS: sourceFPS,
-                maxResolution: request.maxResolution
+                policy: GIFFrameExtractionPolicy(
+                    sourceFPS: sourceFPS,
+                    maxResolution: request.maxResolution,
+                    maxFrameCount: request.maxFrameCount,
+                    decodeMemoryBudgetBytes: request.decodeMemoryBudgetMB * 1024 * 1024
+                )
             )
+            return (
+                output.frames,
+                GIFExtractionSummary(
+                    effectiveSourceFPS: output.effectiveSourceFPS,
+                    effectiveMaxResolution: output.effectiveMaxResolution,
+                    estimatedDecodeBytes: output.estimatedDecodeBytes
+                )
+            )
+        }
+    }
+
+    private static func applyAutoSubjectFraming(
+        to images: [CGImage],
+        config: GIFAutoSubjectFramingConfig
+    ) -> [CGImage] {
+        guard
+            let first = images.first,
+            first.width > 0,
+            first.height > 0
+        else {
+            return images
+        }
+
+        var unionRect: CGRect?
+        for image in images {
+            guard let rect = image.nonTransparentBoundingBox() else {
+                continue
+            }
+            if let existing = unionRect {
+                unionRect = existing.union(rect)
+            } else {
+                unionRect = rect
+            }
+        }
+        guard let unionRect, unionRect.width > 0, unionRect.height > 0 else {
+            return images
+        }
+
+        let canvasWidth = CGFloat(first.width)
+        let canvasHeight = CGFloat(first.height)
+        let currentFill = max(unionRect.width / canvasWidth, unionRect.height / canvasHeight)
+        guard currentFill > 0 else {
+            return images
+        }
+
+        let normalizedPadding = min(max(config.paddingRatio, 0), 0.3)
+        let maxFillFromPadding = max(0.2, 1 - (normalizedPadding * 2))
+        let targetFill = min(max(config.targetFillRatio, 0.2), maxFillFromPadding)
+        guard currentFill < targetFill else {
+            return images
+        }
+
+        let maxUpscale = max(1, config.maxUpscale)
+        let zoom = min(maxUpscale, targetFill / currentFill)
+        guard zoom > 1.01 else {
+            return images
+        }
+
+        let focusCenter = CGPoint(x: unionRect.midX, y: unionRect.midY)
+        let outputSize = CGSize(width: canvasWidth, height: canvasHeight)
+        return images.compactMap { image in
+            let baseImage = GIFImage.gifImage(cgImage: image)
+            let scaledImage = baseImage.resize(
+                to: CGSize(
+                    width: outputSize.width * zoom,
+                    height: outputSize.height * zoom
+                )
+            )
+            guard let scaledCGImage = scaledImage.gifCGImage else {
+                return image
+            }
+
+            let scaledCenter = CGPoint(
+                x: focusCenter.x * zoom,
+                y: focusCenter.y * zoom
+            )
+            let cropRect = CGRect(
+                x: scaledCenter.x - (outputSize.width / 2),
+                y: scaledCenter.y - (outputSize.height / 2),
+                width: outputSize.width,
+                height: outputSize.height
+            )
+            .intersection(
+                CGRect(
+                    x: 0,
+                    y: 0,
+                    width: CGFloat(scaledCGImage.width),
+                    height: CGFloat(scaledCGImage.height)
+                )
+            )
+            .integral
+
+            guard
+                cropRect.width >= outputSize.width * 0.95,
+                cropRect.height >= outputSize.height * 0.95,
+                let cropped = scaledCGImage.cropping(to: cropRect)
+            else {
+                return scaledCGImage
+            }
+            return cropped
         }
     }
 }
@@ -936,7 +1300,9 @@ private enum GIFFinalEncodePipeline {
     static func encode(
         frameURLs: [URL],
         outputURL: URL,
-        frameDelay: Double,
+        outputFPS: Double,
+        maxLongEdge: CGFloat?,
+        frameStride: Int,
         encoding: any GIFEncoding
     ) throws -> GIFGenerationURLResult {
         guard !frameURLs.isEmpty else {
@@ -946,17 +1312,32 @@ private enum GIFFinalEncodePipeline {
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
 
         let start = CFAbsoluteTimeGetCurrent()
+        let stride = max(1, frameStride)
+        let selectedFrameURLs = frameURLs.enumerated().compactMap { index, url in
+            index.isMultiple(of: stride) ? url : nil
+        }
+        guard !selectedFrameURLs.isEmpty else {
+            throw GifError.gifResultNil
+        }
+
+        let effectiveLongEdge = maxLongEdge.map { max(1, $0) }
         var cgImages: [CGImage] = []
-        cgImages.reserveCapacity(frameURLs.count)
-        for frameURL in frameURLs {
+        cgImages.reserveCapacity(selectedFrameURLs.count)
+        for frameURL in selectedFrameURLs {
             guard
-                let image = GIFImage.gifImage(contentsOf: frameURL),
-                let cgImage = image.gifCGImage
+                var image = GIFImage.gifImage(contentsOf: frameURL)
             else {
+                throw GifError.invalidImageData
+            }
+            if let effectiveLongEdge {
+                image = image.resize(width: effectiveLongEdge)
+            }
+            guard let cgImage = image.gifCGImage else {
                 throw GifError.invalidImageData
             }
             cgImages.append(cgImage)
         }
+        let frameDelay = 1.0 / max(outputFPS, 1)
 
         let frames = try encoding.encode(
             cgImages: cgImages,
