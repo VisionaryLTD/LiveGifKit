@@ -16,7 +16,7 @@ struct OperatorButtonsView: View {
                 Button("Remove BG (Image)") {
                     viewModel.removeBackgroundFromSourceImage()
                 }
-                .disabled(viewModel.sourceImage == nil)
+                .disabled(!viewModel.canRemoveBackground)
 
                 Button("Save GIF") {
                     viewModel.saveGIF()

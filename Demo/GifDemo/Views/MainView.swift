@@ -20,10 +20,10 @@ struct MainView: View {
             }
             .navigationTitle("LiveGIFKit Demo")
             .sheet(isPresented: Bindable(viewModel).showFrames) {
-                ImageListView(images: viewModel.generatedResult?.originalFrames ?? [])
+                ImageListView(imageURLs: viewModel.generatedFrameURLs)
             }
             .sheet(isPresented: Bindable(viewModel).showRecommendations) {
-                ImageListView(images: viewModel.recommendedImages)
+                ImageListView(imageURLs: viewModel.recommendedAssets.map(\.thumbnailURL))
             }
         }
     }
@@ -60,6 +60,7 @@ struct MainView: View {
             LabeledContent("Output GIF FPS: \(Int(viewModel.outputFPS))") {
                 Slider(value: Bindable(viewModel).outputFPS, in: 5...60, step: 1)
             }
+
             Text(viewModel.isGenerating ? "Updating preview…" : "Preview updates automatically")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -72,42 +73,47 @@ struct MainView: View {
             HStack(spacing: 8) {
                 Text("Result")
                     .font(.headline)
-                if viewModel.isLoadingSource || viewModel.isGenerating || viewModel.isRemovingBackground {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-                if viewModel.isLoadingSource {
-                    Text("Loading source…")
+
+                ProgressView(value: viewModel.generationProgress)
+                    .controlSize(.small)
+                    .frame(width: 80)
+                    .opacity(viewModel.isProgressVisible ? 1 : 0)
+
+                if viewModel.isProgressVisible {
+                    Text(viewModel.generationStatus)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                } else if viewModel.isRemovingBackground {
-                    Text("Removing background…")
+                } else {
+                    Text("Idle")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else if viewModel.isGenerating {
-                    Text("Generating GIF…")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.clear)
                 }
             }
 
-            if let data = viewModel.generatedResult?.data {
+            if let result = viewModel.generatedResult {
                 previewContainer {
-                    AnimatedImage(data: data)
-                        .resizable()
+                    if let data = result.data {
+                        AnimatedImage(data: data)
+                            .resizable()
+                    } else {
+                        Text("Failed to load GIF data")
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 HStack {
-                    Text("Frames: \(viewModel.generatedResult?.frames.count ?? 0)")
+                    Text("Frames: \(result.frameCount)")
                     Spacer()
                     Button("View Frames") {
-                        viewModel.showFrames = true
+                        viewModel.showFramesSheet()
                     }
                 }
-            } else if let image = viewModel.singleBackgroundRemovedImage {
+            } else if let imageURL = viewModel.singleBackgroundRemovedImageURL {
                 previewContainer {
-                    platformImage(for: image)
-                        .resizable()
+                    if let image = platformImage(for: imageURL) {
+                        image
+                            .resizable()
+                    }
                 }
             } else {
                 Text("Select a source to start auto-generating the GIF preview.")
@@ -122,24 +128,39 @@ struct MainView: View {
     }
 
     private var previewAspectRatio: CGFloat {
-        guard let frame = viewModel.generatedResult?.frames.first else {
-            guard let image = viewModel.singleBackgroundRemovedImage else {
-                return 1
-            }
+        if let result = viewModel.generatedResult {
+            let width = max(result.pixelSize.width, 1)
+            let height = max(result.pixelSize.height, 1)
+            return width / height
+        }
+
+        if
+            let imageURL = viewModel.singleBackgroundRemovedImageURL,
+            let image = loadPlatformImage(from: imageURL)
+        {
             let width = max(image.size.width, 1)
             let height = max(image.size.height, 1)
             return width / height
         }
-        let width = max(frame.size.width, 1)
-        let height = max(frame.size.height, 1)
-        return width / height
+        return 1
     }
 
-    private func platformImage(for image: GIFImage) -> Image {
+    private func platformImage(for url: URL) -> Image? {
+        guard let image = loadPlatformImage(from: url) else {
+            return nil
+        }
         #if canImport(UIKit)
-        Image(uiImage: image)
+        return Image(uiImage: image)
         #else
-        Image(nsImage: image)
+        return Image(nsImage: image)
+        #endif
+    }
+
+    private func loadPlatformImage(from url: URL) -> GIFImage? {
+        #if canImport(UIKit)
+        GIFImage(contentsOfFile: url.path)
+        #else
+        GIFImage(contentsOf: url)
         #endif
     }
 
@@ -152,10 +173,10 @@ struct MainView: View {
 
             content()
                 .frame(width: previewWidth, height: previewHeight)
-                .overlay(
+                .overlay {
                     Rectangle()
                         .stroke(.red, lineWidth: 2)
-                )
+                }
                 .position(x: proxy.size.width / 2, y: previewHeight / 2)
         }
         .frame(height: 320)

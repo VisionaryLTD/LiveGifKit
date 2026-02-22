@@ -1,67 +1,99 @@
 import CoreGraphics
 import Foundation
-import Photos
-#if canImport(PhotosUI)
-import PhotosUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif
 
-public struct GIFGenerationRequest: @unchecked Sendable {
-    public var source: GIFGenerationSource
+public struct GIFGenerationURLRequest: Sendable {
+    public var source: GIFGenerationURLSource
     public var options: GIFGenerationOptions
+    public var outputGIFURL: URL?
 
     public init(
-        source: GIFGenerationSource,
-        options: GIFGenerationOptions = GIFGenerationOptions()
+        source: GIFGenerationURLSource,
+        options: GIFGenerationOptions = GIFGenerationOptions(),
+        outputGIFURL: URL? = nil
     ) {
         self.source = source
         self.options = options
+        self.outputGIFURL = outputGIFURL
     }
 }
 
-public enum GIFGenerationSource: @unchecked Sendable {
-    #if canImport(PhotosUI)
-    case livePhoto(PHLivePhoto, sourceFPS: Double = 30)
-    #endif
-    case images([GIFImage], adjustOrientation: Bool = false)
-    case video(URL, sourceFPS: Double? = nil)
+public enum GIFGenerationURLSource: Sendable {
+    case imageFiles([URL], adjustOrientation: Bool = false)
+    case videoFile(URL, sourceFPS: Double? = nil)
+    case livePhotoVideoFile(URL, sourceFPS: Double = 30)
 }
 
 public struct GIFGenerationOptions: @unchecked Sendable {
     public var outputFPS: Double
     public var maxResolution: CGFloat
     public var removeBackground: Bool
-    public var includeOriginalFrames: Bool
     public var watermarks: [GIFWatermark]
 
     public init(
         outputFPS: Double = 30,
         maxResolution: CGFloat = 500,
         removeBackground: Bool = false,
-        includeOriginalFrames: Bool = false,
         watermarks: [GIFWatermark] = []
     ) {
         self.outputFPS = outputFPS
         self.maxResolution = maxResolution
         self.removeBackground = removeBackground
-        self.includeOriginalFrames = includeOriginalFrames
         self.watermarks = watermarks
     }
 }
 
-public struct GIFGenerationResult: @unchecked Sendable {
-    public let fileURL: URL
-    public let frames: [GIFImage]
-    public let originalFrames: [GIFImage]
+public struct GIFGenerationURLResult: Sendable {
+    public let gifURL: URL
+    public let frameCount: Int
+    public let pixelSize: CGSize
+    public let duration: TimeInterval
 
-    public init(fileURL: URL, frames: [GIFImage], originalFrames: [GIFImage] = []) {
-        self.fileURL = fileURL
-        self.frames = frames
-        self.originalFrames = originalFrames
+    public init(gifURL: URL, frameCount: Int, pixelSize: CGSize, duration: TimeInterval) {
+        self.gifURL = gifURL
+        self.frameCount = frameCount
+        self.pixelSize = pixelSize
+        self.duration = duration
     }
 
     public var data: Data? {
-        try? Data(contentsOf: fileURL)
+        try? Data(contentsOf: gifURL)
     }
+}
+
+public enum GIFGenerationEvent: Sendable {
+    case preparingFrames(completed: Int, total: Int?)
+    case encoding(completed: Int, total: Int?)
+    case completed(GIFGenerationURLResult)
+}
+
+public struct GIFBackgroundRemovalURLRequest: Sendable {
+    public var inputImageURL: URL
+    public var outputImageURL: URL?
+
+    public init(inputImageURL: URL, outputImageURL: URL? = nil) {
+        self.inputImageURL = inputImageURL
+        self.outputImageURL = outputImageURL
+    }
+}
+
+public struct GIFBackgroundRemovalURLResult: Sendable {
+    public let imageURL: URL
+    public let pixelSize: CGSize
+
+    public init(imageURL: URL, pixelSize: CGSize) {
+        self.imageURL = imageURL
+        self.pixelSize = pixelSize
+    }
+}
+
+public enum GIFBackgroundRemovalEvent: Sendable {
+    case processing
+    case completed(GIFBackgroundRemovalURLResult)
 }
 
 public struct GIFWatermark: @unchecked Sendable {
@@ -118,12 +150,12 @@ public enum GIFWatermarkPosition: String, CaseIterable, Sendable {
     case center
 }
 
-public struct GIFSaveRequest: @unchecked Sendable {
-    public var payload: GIFSavePayload
+public struct GIFSaveURLRequest: Sendable {
+    public var payload: GIFSaveURLPayload
     public var destination: GIFSaveDestination
 
     public init(
-        payload: GIFSavePayload,
+        payload: GIFSaveURLPayload,
         destination: GIFSaveDestination = .photoLibrary(albumName: "LifeStickers")
     ) {
         self.payload = payload
@@ -131,9 +163,8 @@ public struct GIFSaveRequest: @unchecked Sendable {
     }
 }
 
-public enum GIFSavePayload: @unchecked Sendable {
+public enum GIFSaveURLPayload: Sendable {
     case fileURL(URL)
-    case image(GIFImage)
 }
 
 public enum GIFSaveDestination: Sendable {
@@ -148,13 +179,29 @@ public struct GIFSaveResult: Sendable {
     }
 }
 
-public struct GIFRecommendationRequest: Sendable {
+public struct GIFRecommendationURLRequest: Sendable {
     public var days: Int
     public var thumbnailSize: CGSize
+    public var outputDirectoryURL: URL?
 
-    public init(days: Int = 30, thumbnailSize: CGSize = CGSize(width: 50, height: 50)) {
+    public init(
+        days: Int = 30,
+        thumbnailSize: CGSize = CGSize(width: 50, height: 50),
+        outputDirectoryURL: URL? = nil
+    ) {
         self.days = days
         self.thumbnailSize = thumbnailSize
+        self.outputDirectoryURL = outputDirectoryURL
+    }
+}
+
+public struct GIFRecommendedAsset: Sendable {
+    public var assetLocalIdentifier: String?
+    public var thumbnailURL: URL
+
+    public init(assetLocalIdentifier: String?, thumbnailURL: URL) {
+        self.assetLocalIdentifier = assetLocalIdentifier
+        self.thumbnailURL = thumbnailURL
     }
 }
 

@@ -2,12 +2,10 @@ import Dependencies
 import Foundation
 
 public protocol GIFToolKit: Sendable {
-    func generateGIF(_ request: GIFGenerationRequest) async throws -> GIFGenerationResult
-    @MainActor
-    func removeBackground(from image: GIFImage) async throws -> GIFImage
-    func save(_ request: GIFSaveRequest) async throws -> GIFSaveResult
-    @MainActor
-    func fetchRecommendedImages(_ request: GIFRecommendationRequest) async throws -> [GIFImage]
+    func generateGIF(_ request: GIFGenerationURLRequest) -> AsyncThrowingStream<GIFGenerationEvent, Error>
+    func removeBackground(_ request: GIFBackgroundRemovalURLRequest) -> AsyncThrowingStream<GIFBackgroundRemovalEvent, Error>
+    func save(_ request: GIFSaveURLRequest) async throws -> GIFSaveResult
+    func fetchRecommendedAssets(_ request: GIFRecommendationURLRequest) async throws -> [GIFRecommendedAsset]
     func preheat() async throws
     func cleanup(_ scope: GIFCleanupScope) async throws
 }
@@ -26,31 +24,66 @@ public extension DependencyValues {
 }
 
 internal struct GIFToolKitPreview: GIFToolKit {
-    func generateGIF(_ request: GIFGenerationRequest) async throws -> GIFGenerationResult {
-        switch request.source {
-        case .images(let images, _):
-            let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
-                .appending(path: "livegifkit-preview.gif")
-            if !FileManager.default.fileExists(atPath: tempURL.path) {
-                try Data().write(to: tempURL)
+    func generateGIF(_ request: GIFGenerationURLRequest) -> AsyncThrowingStream<GIFGenerationEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    continuation.yield(.preparingFrames(completed: 0, total: nil))
+                    let count: Int
+                    let pixelSize: CGSize
+                    switch request.source {
+                    case .imageFiles(let urls, _):
+                        count = urls.count
+                        pixelSize = GIFImage.gifImage(contentsOf: urls.first ?? URL(fileURLWithPath: "/dev/null"))?.size ?? .zero
+                    case .videoFile:
+                        count = 1
+                        pixelSize = .zero
+                    case .livePhotoVideoFile:
+                        count = 1
+                        pixelSize = .zero
+                    }
+
+                    let outputURL = request.outputGIFURL ?? URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "livegifkit-preview.gif")
+                    if !FileManager.default.fileExists(atPath: outputURL.path) {
+                        try Data().write(to: outputURL)
+                    }
+                    continuation.yield(.encoding(completed: count, total: count))
+                    continuation.yield(
+                        .completed(
+                            GIFGenerationURLResult(
+                                gifURL: outputURL,
+                                frameCount: count,
+                                pixelSize: pixelSize,
+                                duration: 0
+                            )
+                        )
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
             }
-            return GIFGenerationResult(fileURL: tempURL, frames: images)
-        default:
-            throw GifError.unsupportedSource
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
-    @MainActor
-    func removeBackground(from image: GIFImage) async throws -> GIFImage {
-        image
+    func removeBackground(_ request: GIFBackgroundRemovalURLRequest) -> AsyncThrowingStream<GIFBackgroundRemovalEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                continuation.yield(.processing)
+                let outputURL = request.outputImageURL ?? request.inputImageURL
+                continuation.yield(.completed(.init(imageURL: outputURL, pixelSize: .zero)))
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
-    func save(_ request: GIFSaveRequest) async throws -> GIFSaveResult {
+    func save(_ request: GIFSaveURLRequest) async throws -> GIFSaveResult {
         GIFSaveResult(localIdentifier: nil)
     }
 
-    @MainActor
-    func fetchRecommendedImages(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
+    func fetchRecommendedAssets(_ request: GIFRecommendationURLRequest) async throws -> [GIFRecommendedAsset] {
         []
     }
 
@@ -60,21 +93,23 @@ internal struct GIFToolKitPreview: GIFToolKit {
 }
 
 internal struct GIFToolKitUnimplemented: GIFToolKit {
-    func generateGIF(_ request: GIFGenerationRequest) async throws -> GIFGenerationResult {
+    func generateGIF(_ request: GIFGenerationURLRequest) -> AsyncThrowingStream<GIFGenerationEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: GifError.unimplemented)
+        }
+    }
+
+    func removeBackground(_ request: GIFBackgroundRemovalURLRequest) -> AsyncThrowingStream<GIFBackgroundRemovalEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: GifError.unimplemented)
+        }
+    }
+
+    func save(_ request: GIFSaveURLRequest) async throws -> GIFSaveResult {
         throw GifError.unimplemented
     }
 
-    @MainActor
-    func removeBackground(from image: GIFImage) async throws -> GIFImage {
-        throw GifError.unimplemented
-    }
-
-    func save(_ request: GIFSaveRequest) async throws -> GIFSaveResult {
-        throw GifError.unimplemented
-    }
-
-    @MainActor
-    func fetchRecommendedImages(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
+    func fetchRecommendedAssets(_ request: GIFRecommendationURLRequest) async throws -> [GIFRecommendedAsset] {
         throw GifError.unimplemented
     }
 

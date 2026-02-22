@@ -1,36 +1,33 @@
-# LiveGIFKit Migration Guide
+# LiveGIFKit Migration Guide (Breaking: URL-First + Consumer Streams)
 
-This guide explains how to migrate from the legacy `LiveGifTool` API to the new `GIFToolKit` API.
+This release is a **breaking migration** to URL-first APIs and stream-based progress events.
 
 ## What changed
 
-- New primary API is `GIFToolKit` resolved from `swift-dependencies`.
-- New request/response models use `GIF`-uppercase naming:
-  - `GIFGenerationRequest`, `GIFGenerationSource`, `GIFGenerationOptions`, `GIFGenerationResult`
-  - `GIFSaveRequest`, `GIFSavePayload`, `GIFSaveResult`
-  - `GIFRecommendationRequest`, `GIFCleanupScope`
-- Legacy public APIs (`LiveGifTool`, `GifToolParameter`, `GifResult`, `Method`) are kept as deprecated compatibility wrappers.
+- `LiveGifTool`, `GifToolParameter`, `GifResult`, and `Method` were removed.
+- `GIFToolKit` is the only public entrypoint (resolved through `swift-dependencies`).
+- Generation and background removal now return `AsyncThrowingStream` event streams.
+- Public request/response models are URL-first:
+  - `GIFGenerationURLRequest`, `GIFGenerationURLSource`, `GIFGenerationURLResult`
+  - `GIFBackgroundRemovalURLRequest`, `GIFBackgroundRemovalURLResult`
+  - `GIFSaveURLRequest`, `GIFSaveURLPayload`, `GIFSaveResult`
+  - `GIFRecommendationURLRequest`, `GIFRecommendedAsset`
+- `GIFWatermark.Content` keeps URL-only image payload (`.imageFile(URL, width:)`), plus a bridge:
+  - `@MainActor static func image(_ image: GIFImage, width: CGFloat) throws -> GIFWatermark.Content`
 
-## Two-phase deprecation timeline
+## Old → new mapping
 
-1. **Current release**: New `GIFToolKit` APIs are the recommended path. Legacy APIs still work, but are deprecated.
-2. **Next major release**: Legacy wrappers are scheduled for removal.
-
-## Old → new API mapping
-
-| Legacy API | New API |
+| Previous API | New API |
 | --- | --- |
-| `LiveGifTool.createGif(parameter:)` | `gifToolKit.generateGIF(_:)` |
+| `LiveGifTool.createGif(parameter:)` | `gifToolKit.generateGIF(_:)` (stream) |
+| `LiveGifTool.removeBackground(uiImage:)` | `gifToolKit.removeBackground(_:)` (stream) |
 | `LiveGifTool.save(method:)` | `gifToolKit.save(_:)` |
-| `LiveGifTool.removeBackground(uiImage:)` | `gifToolKit.removeBackground(from:)` |
-| `LiveGifTool.preheating()` | `gifToolKit.preheat()` |
-| `LiveGifTool.cleanup()` / `cleanupAllTmp()` | `gifToolKit.cleanup(_:)` |
-| `GifToolParameter` | `GIFGenerationRequest` + `GIFGenerationOptions` |
-| `GifResult` | `GIFGenerationResult` |
-| `Method` | `GIFSaveRequest` + `GIFSavePayload` |
-| `FetchPhoto.fetch(days:)` | `gifToolKit.fetchRecommendedImages(_:)` |
+| `FetchPhoto.fetch(days:)` | `gifToolKit.fetchRecommendedAssets(_:)` |
+| `GifToolParameter.DataSource.images` | `GIFGenerationURLSource.imageFiles` |
+| `GifToolParameter.DataSource.video` | `GIFGenerationURLSource.videoFile` |
+| `GifToolParameter.DataSource.livePhoto` | `GIFGenerationURLSource.livePhotoVideoFile` |
 
-## Dependency injection usage
+## Dependency injection
 
 ```swift
 import Dependencies
@@ -42,140 +39,99 @@ import LiveGifKit
 For tests:
 
 ```swift
-let result = try await withDependencies {
-  $0.gifToolKit = MyTestGIFToolKit()
+let output = try await withDependencies {
+  $0.gifToolKit = MyGIFToolKitStub()
 } operation: {
-  try await gifToolKit.generateGIF(request)
+  try await runFeature()
 }
 ```
 
-## Migration examples
+## Generate GIF (before/after)
 
-### 1) Generate GIF from images
-
-Legacy:
+Before:
 
 ```swift
 let tool = LiveGifTool()
-let parameter = GifToolParameter(
-  data: .images(frames: images, adjustOrientation: true),
-  gifFPS: 30,
-  removeBg: true
-)
 let result = try await tool.createGif(parameter: parameter)
 ```
 
-New:
+After:
 
 ```swift
-@Dependency(\.gifToolKit) var gifToolKit
-
-let request = GIFGenerationRequest(
-  source: .images(images, adjustOrientation: true),
-  options: GIFGenerationOptions(
-    outputFPS: 30,
-    removeBackground: true
-  )
+let request = GIFGenerationURLRequest(
+  source: .imageFiles(imageURLs, adjustOrientation: true),
+  options: GIFGenerationOptions(outputFPS: 24, removeBackground: true)
 )
-let result = try await gifToolKit.generateGIF(request)
+
+var finalResult: GIFGenerationURLResult?
+for try await event in gifToolKit.generateGIF(request) {
+  switch event {
+  case .preparingFrames(let completed, let total):
+    print("Preparing \(completed)/\(total ?? 0)")
+  case .encoding(let completed, let total):
+    print("Encoding \(completed)/\(total ?? 0)")
+  case .completed(let result):
+    finalResult = result
+  }
+}
 ```
 
-### 2) Generate GIF from Live Photo
+## Remove background (before/after)
 
-Legacy:
-
-```swift
-let parameter = GifToolParameter(
-  data: .livePhoto(livePhoto: livePhoto, livePhotoFPS: 15),
-  gifFPS: 30
-)
-let result = try await LiveGifTool().createGif(parameter: parameter)
-```
-
-New:
-
-```swift
-let request = GIFGenerationRequest(
-  source: .livePhoto(livePhoto, sourceFPS: 15),
-  options: GIFGenerationOptions(outputFPS: 30)
-)
-let result = try await gifToolKit.generateGIF(request)
-```
-
-### 3) Add watermark
-
-Legacy:
-
-```swift
-let config = ImageDecorateConfig(type: .text(text: "Demo"))
-let parameter = GifToolParameter(
-  data: .images(frames: images),
-  imageDecorates: [config]
-)
-```
-
-New:
-
-```swift
-let watermark = GIFWatermark(
-  content: .text("Demo", font: .boldSystemFont(ofSize: 24), textColor: .red, backgroundColor: .clear),
-  position: .center
-)
-let request = GIFGenerationRequest(
-  source: .images(images),
-  options: GIFGenerationOptions(watermarks: [watermark])
-)
-```
-
-### 4) Remove background
-
-Legacy:
+Before:
 
 ```swift
 let data = try await LiveGifTool().removeBackground(uiImage: image)
 ```
 
-New:
+After:
 
 ```swift
-let image = try await gifToolKit.removeBackground(from: image)
-let data = image.gifPNGData
+let request = GIFBackgroundRemovalURLRequest(inputImageURL: inputURL)
+for try await event in gifToolKit.removeBackground(request) {
+  if case .completed(let result) = event {
+    print(result.imageURL)
+  }
+}
 ```
 
-### 5) Save to photo library
+## Watermark image bridge
 
-Legacy:
+Core watermark payloads are URL-only. If your caller has `GIFImage`, convert once on main actor:
 
 ```swift
-try await LiveGifTool().save(method: .url(result.url))
+let content = try await MainActor.run {
+  try GIFWatermark.Content.image(image, width: 60)
+}
+let watermark = GIFWatermark(content: content, position: .bottomRight)
 ```
 
-New:
+The generated temporary watermark files are cleaned by:
+- `cleanup(.requestOnly)` for request-scoped cleanup
+- `cleanup(.allTemporaryGIFFiles)` for full temporary cleanup
+
+## Save and recommendations
 
 ```swift
-let saveRequest = GIFSaveRequest(payload: .fileURL(result.fileURL))
-_ = try await gifToolKit.save(saveRequest)
+_ = try await gifToolKit.save(
+  GIFSaveURLRequest(payload: .fileURL(gifURL))
+)
+
+let assets = try await gifToolKit.fetchRecommendedAssets(
+  GIFRecommendationURLRequest(days: 30)
+)
 ```
 
-### 6) Cleanup
-
-Legacy:
+## Cleanup and lifecycle
 
 ```swift
-try LiveGifTool().cleanup()
-```
-
-New:
-
-```swift
+try await gifToolKit.preheat()
+try await gifToolKit.cleanup(.requestOnly)
 try await gifToolKit.cleanup(.allTemporaryGIFFiles)
 ```
 
-## Platform notes (iOS + macOS)
+## Platform notes
 
-- Package supports `iOS 17+` and `macOS 14+`.
-- Demo target now runs on iOS and can run on Apple Silicon Mac as a Designed-for-iPad app destination.
-- Use `GIFImage` for cross-platform image type:
-  - `UIImage` on iOS
-  - `NSImage` on macOS
-
+- Minimum platforms: `iOS 17+`, `macOS 14+`.
+- Public API is URL-first for concurrency safety and memory stability.
+- `GIFImage` remains available for platform image interop (`UIImage`/`NSImage`) and watermark bridging.

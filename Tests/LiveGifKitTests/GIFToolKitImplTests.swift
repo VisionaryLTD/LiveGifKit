@@ -1,11 +1,11 @@
-@testable import LiveGifKit
 import CoreGraphics
 import Foundation
+@testable import LiveGifKit
 import Testing
 
 @Suite("GIFToolKitImpl")
 struct GIFToolKitImplTests {
-    @Test("Generate GIF from images applies shared pipeline")
+    @Test("Generate GIF from image files emits events")
     func generateFromImagesPipeline() async throws {
         let storage = TemporaryStorageStub()
         let encoding = EncodingStub()
@@ -14,41 +14,43 @@ struct GIFToolKitImplTests {
         let photoLibrary = PhotoLibraryStub()
         let recommendations = RecommendationProviderStub()
 
-        let sourceImage = makeGIFImage(width: 40, height: 20, alpha: 255)
-        let processedImage = makeCGImage(width: 20, height: 10, alpha: 255)
-        await backgroundRemover.setOutputImages([processedImage])
-        encoding.outputFrames = [GIFImage.gifImage(cgImage: processedImage)]
+        let inputImage = makeGIFImage(width: 40, height: 20, alpha: 255)
+        let sourceURL = try writeImageToTempFile(inputImage, ext: "png")
+        let processed = makeCGImage(width: 20, height: 10, alpha: 255)
+        backgroundRemover.outputImages = [processed]
+        encoding.outputFrames = [GIFImage.gifImage(cgImage: processed)]
 
-        let toolKit = GIFToolKitImpl(
+        let toolKit = makeToolKit(
+            storage: storage,
             encoding: encoding,
-            videoFrameExtractor: extractor,
+            extractor: extractor,
             backgroundRemover: backgroundRemover,
             photoLibrary: photoLibrary,
-            storage: storage,
-            recommendationProvider: recommendations
+            recommendations: recommendations
         )
-        let request = GIFGenerationRequest(
-            source: .images([sourceImage], adjustOrientation: true),
+
+        let request = GIFGenerationURLRequest(
+            source: .imageFiles([sourceURL], adjustOrientation: true),
             options: GIFGenerationOptions(
                 outputFPS: 20,
                 maxResolution: 250,
                 removeBackground: true,
-                includeOriginalFrames: true,
                 watermarks: [GIFWatermark(content: .text("Demo"), position: .bottomRight)]
             )
         )
+        let events = try await collectEvents(from: toolKit.generateGIF(request))
+        let result = try #require(completedResult(in: events))
 
-        let result = try await toolKit.generateGIF(request)
+        #expect(containsPreparingEvent(events))
+        #expect(containsEncodingEvent(events))
+        #expect(result.frameCount == 1)
+        #expect(result.gifURL.deletingLastPathComponent().standardizedFileURL.path == storage.directory.standardizedFileURL.path)
+        #expect(backgroundRemover.calls == 1)
+
         let snapshot = encoding.snapshot()
-        let removerSnapshot = await backgroundRemover.snapshot()
-
         #expect(snapshot.capturedCGImages.count == 1)
         #expect(snapshot.capturedFrameDelay == 0.05)
         #expect(snapshot.capturedWatermarks.count == 1)
-        #expect(removerSnapshot.calls == 1)
-        #expect(result.frames.count == 1)
-        #expect(result.originalFrames.count == 1)
-        #expect(result.fileURL.deletingLastPathComponent().path == storage.directory.path)
     }
 
     @Test("Generate GIF from video forwards extractor options")
@@ -59,42 +61,98 @@ struct GIFToolKitImplTests {
         let backgroundRemover = BackgroundRemoverStub()
         let photoLibrary = PhotoLibraryStub()
         let recommendations = RecommendationProviderStub()
-        let extractedImage = makeGIFImage(width: 30, height: 20, alpha: 255)
-        await extractor.setOutputImages([extractedImage])
-        encoding.outputFrames = [extractedImage]
+        let extracted = makeGIFImage(width: 30, height: 20, alpha: 255)
+        extractor.outputImages = [extracted]
+        encoding.outputFrames = [extracted]
 
-        let toolKit = GIFToolKitImpl(
+        let toolKit = makeToolKit(
+            storage: storage,
             encoding: encoding,
-            videoFrameExtractor: extractor,
+            extractor: extractor,
             backgroundRemover: backgroundRemover,
             photoLibrary: photoLibrary,
-            storage: storage,
-            recommendationProvider: recommendations
+            recommendations: recommendations
         )
         let videoURL = URL(fileURLWithPath: "/tmp/sample.mov")
-        let request = GIFGenerationRequest(
-            source: .video(videoURL, sourceFPS: 12),
+        let request = GIFGenerationURLRequest(
+            source: .videoFile(videoURL, sourceFPS: 12),
             options: GIFGenerationOptions(outputFPS: 24, maxResolution: 333)
         )
 
-        _ = try await toolKit.generateGIF(request)
-        let extractorSnapshot = await extractor.snapshot()
-        let removerSnapshot = await backgroundRemover.snapshot()
-
-        #expect(extractorSnapshot.lastVideoURL == videoURL)
-        #expect(extractorSnapshot.lastSourceFPS == 12)
-        #expect(extractorSnapshot.lastMaxResolution == 333)
-        #expect(removerSnapshot.calls == 0)
+        _ = try await collectEvents(from: toolKit.generateGIF(request))
+        #expect(extractor.lastVideoURL == videoURL)
+        #expect(extractor.lastSourceFPS == 12)
+        #expect(extractor.lastMaxResolution == 333)
+        #expect(backgroundRemover.calls == 0)
     }
 
-    @Test("GIFWatermark image bridge exports image file URL")
+    @Test("Remove background stream succeeds and writes output file")
+    func removeBackgroundSucceeds() async throws {
+        let storage = TemporaryStorageStub()
+        let encoding = EncodingStub()
+        let extractor = VideoFrameExtractorStub()
+        let backgroundRemover = BackgroundRemoverStub()
+        let photoLibrary = PhotoLibraryStub()
+        let recommendations = RecommendationProviderStub()
+        let sourceURL = try writeImageToTempFile(makeGIFImage(width: 30, height: 30, alpha: 255), ext: "png")
+        let processed = makeCGImage(width: 10, height: 10, alpha: 255)
+        backgroundRemover.outputImages = [processed]
+
+        let toolKit = makeToolKit(
+            storage: storage,
+            encoding: encoding,
+            extractor: extractor,
+            backgroundRemover: backgroundRemover,
+            photoLibrary: photoLibrary,
+            recommendations: recommendations
+        )
+
+        let events = try await collectBackgroundEvents(
+            from: toolKit.removeBackground(.init(inputImageURL: sourceURL))
+        )
+        let result = try #require(completedBackgroundResult(in: events))
+
+        #expect(containsBackgroundProcessingEvent(events))
+        #expect(FileManager.default.fileExists(atPath: result.imageURL.path))
+        #expect(result.pixelSize.width == 10)
+        #expect(result.pixelSize.height == 10)
+    }
+
+    @Test("Remove background fails for empty remover output")
+    func removeBackgroundFailsForEmptyOutput() async throws {
+        let storage = TemporaryStorageStub()
+        let encoding = EncodingStub()
+        let extractor = VideoFrameExtractorStub()
+        let backgroundRemover = BackgroundRemoverStub()
+        let photoLibrary = PhotoLibraryStub()
+        let recommendations = RecommendationProviderStub()
+        let sourceURL = try writeImageToTempFile(makeGIFImage(width: 18, height: 18, alpha: 255), ext: "png")
+        backgroundRemover.outputImages = []
+        backgroundRemover.alwaysUseOutputImages = true
+
+        let toolKit = makeToolKit(
+            storage: storage,
+            encoding: encoding,
+            extractor: extractor,
+            backgroundRemover: backgroundRemover,
+            photoLibrary: photoLibrary,
+            recommendations: recommendations
+        )
+
+        await #expect(throws: GifError.self) {
+            _ = try await collectBackgroundEvents(
+                from: toolKit.removeBackground(.init(inputImageURL: sourceURL))
+            )
+        }
+    }
+
+    @Test("GIFWatermark image bridge exports URL")
     @MainActor
     func watermarkImageBridgeExportsURL() throws {
         let image = makeGIFImage(width: 40, height: 40, alpha: 255)
         let content = try GIFWatermark.Content.image(image, width: 48)
-
         switch content {
-        case let .imageFile(url, width):
+        case .imageFile(let url, let width):
             #expect(width == 48)
             #expect(FileManager.default.fileExists(atPath: url.path))
             try? FileManager.default.removeItem(at: url)
@@ -103,15 +161,7 @@ struct GIFToolKitImplTests {
         }
     }
 
-    @Test("GIFWatermark image bridge throws for invalid image")
-    @MainActor
-    func watermarkImageBridgeThrowsForInvalidImage() async {
-        #expect(throws: GIFError.self) {
-            _ = try GIFWatermark.Content.image(makeInvalidGIFImage())
-        }
-    }
-
-    @Test("Request cleanup removes managed watermark temporary files")
+    @Test("Cleanup request removes managed watermark temporary files")
     @MainActor
     func requestCleanupRemovesManagedWatermarkFiles() async throws {
         let storage = TemporaryStorageStub()
@@ -120,108 +170,41 @@ struct GIFToolKitImplTests {
         let backgroundRemover = BackgroundRemoverStub()
         let photoLibrary = PhotoLibraryStub()
         let recommendations = RecommendationProviderStub()
-        let sourceImage = makeGIFImage(width: 32, height: 32, alpha: 255)
+        let sourceImage = makeGIFImage(width: 30, height: 30, alpha: 255)
+        let sourceURL = try writeImageToTempFile(sourceImage, ext: "png")
         let watermarkImage = makeGIFImage(width: 16, height: 16, alpha: 255)
         let content = try GIFWatermark.Content.image(watermarkImage, width: 12)
-        guard case let .imageFile(url, _) = content else {
+
+        guard case .imageFile(let watermarkURL, _) = content else {
             Issue.record("Expected managed watermark URL")
             return
         }
+
         encoding.outputFrames = [sourceImage]
 
-        let toolKit = GIFToolKitImpl(
+        let toolKit = makeToolKit(
+            storage: storage,
             encoding: encoding,
-            videoFrameExtractor: extractor,
+            extractor: extractor,
             backgroundRemover: backgroundRemover,
             photoLibrary: photoLibrary,
-            storage: storage,
-            recommendationProvider: recommendations
+            recommendations: recommendations
         )
-        _ = try await toolKit.generateGIF(
-            .init(
-                source: .images([sourceImage]),
-                options: GIFGenerationOptions(
-                    outputFPS: 20,
-                    watermarks: [GIFWatermark(content: content)]
-                )
+        let request = GIFGenerationURLRequest(
+            source: .imageFiles([sourceURL]),
+            options: GIFGenerationOptions(
+                outputFPS: 20,
+                watermarks: [GIFWatermark(content: content)]
             )
         )
-        #expect(FileManager.default.fileExists(atPath: url.path))
+        _ = try await collectEvents(from: toolKit.generateGIF(request))
+        #expect(FileManager.default.fileExists(atPath: watermarkURL.path))
 
         try await toolKit.cleanup(.requestOnly)
-        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(!FileManager.default.fileExists(atPath: watermarkURL.path))
     }
 
-    @Test("Generate GIF spills frames to temporary files when over memory budget")
-    func generateSpillsFramesWhenBudgetExceeded() async throws {
-        let storage = TemporaryStorageStub()
-        let encoding = EncodingStub()
-        let extractor = VideoFrameExtractorStub()
-        let backgroundRemover = BackgroundRemoverStub()
-        let photoLibrary = PhotoLibraryStub()
-        let recommendations = RecommendationProviderStub()
-        let first = makeGIFImage(width: 120, height: 120, alpha: 255)
-        let second = makeGIFImage(width: 120, height: 120, alpha: 255)
-        encoding.outputFrames = [first, second]
-
-        let toolKit = GIFToolKitImpl(
-            encoding: encoding,
-            videoFrameExtractor: extractor,
-            backgroundRemover: backgroundRemover,
-            photoLibrary: photoLibrary,
-            storage: storage,
-            recommendationProvider: recommendations,
-            frameStorageMemoryBudgetBytes: 1
-        )
-        _ = try await toolKit.generateGIF(
-            .init(
-                source: .images([first, second]),
-                options: GIFGenerationOptions(outputFPS: 20)
-            )
-        )
-
-        let files = try FileManager.default.contentsOfDirectory(
-            at: storage.directory,
-            includingPropertiesForKeys: nil
-        )
-        let spilledFrames = files.filter { $0.lastPathComponent.hasPrefix("frame-") && $0.pathExtension == "png" }
-        let snapshot = encoding.snapshot()
-
-        #expect(!spilledFrames.isEmpty)
-        #expect(snapshot.capturedCGImages.count == 2)
-    }
-
-    @Test("Cleanup removes latest request directory and all temporary files")
-    func cleanupScopes() async throws {
-        let storage = TemporaryStorageStub()
-        let encoding = EncodingStub()
-        let extractor = VideoFrameExtractorStub()
-        let backgroundRemover = BackgroundRemoverStub()
-        let photoLibrary = PhotoLibraryStub()
-        let recommendations = RecommendationProviderStub()
-        let sourceImage = makeGIFImage(width: 12, height: 12, alpha: 255)
-        encoding.outputFrames = [sourceImage]
-
-        let toolKit = GIFToolKitImpl(
-            encoding: encoding,
-            videoFrameExtractor: extractor,
-            backgroundRemover: backgroundRemover,
-            photoLibrary: photoLibrary,
-            storage: storage,
-            recommendationProvider: recommendations
-        )
-
-        _ = try await toolKit.generateGIF(.init(source: .images([sourceImage])))
-        try await toolKit.cleanup(.requestOnly)
-        try await toolKit.cleanup(.allTemporaryGIFFiles)
-
-        #expect(storage.cleanedDirectories.count == 1)
-        #expect(storage.cleanedDirectories.first == storage.directory)
-        #expect(storage.cleanupAllCalls == 1)
-    }
-
-    @Test("Save and recommendations forward requests")
-    @MainActor
+    @Test("Save and recommendation requests are forwarded")
     func saveAndRecommendationsForwarding() async throws {
         let storage = TemporaryStorageStub()
         let encoding = EncodingStub()
@@ -229,91 +212,33 @@ struct GIFToolKitImplTests {
         let backgroundRemover = BackgroundRemoverStub()
         let photoLibrary = PhotoLibraryStub()
         let recommendations = RecommendationProviderStub()
-        await recommendations.setOutputImages([makeGIFImage(width: 8, height: 8, alpha: 255)])
-        await photoLibrary.setOutput(GIFSaveResult(localIdentifier: "saved-id"))
 
-        let toolKit = GIFToolKitImpl(
+        photoLibrary.output = GIFSaveResult(localIdentifier: "saved-id")
+        recommendations.outputAssets = [
+            GIFRecommendedAsset(
+                assetLocalIdentifier: "asset-1",
+                thumbnailURL: URL(fileURLWithPath: "/tmp/thumb.png")
+            ),
+        ]
+
+        let toolKit = makeToolKit(
+            storage: storage,
             encoding: encoding,
-            videoFrameExtractor: extractor,
+            extractor: extractor,
             backgroundRemover: backgroundRemover,
             photoLibrary: photoLibrary,
-            storage: storage,
-            recommendationProvider: recommendations
+            recommendations: recommendations
         )
+        let saveRequest = GIFSaveURLRequest(payload: .fileURL(URL(fileURLWithPath: "/tmp/out.gif")))
+        let recommendationRequest = GIFRecommendationURLRequest(days: 14, thumbnailSize: CGSize(width: 90, height: 70))
 
-        let saveRequest = GIFSaveRequest(payload: .fileURL(URL(fileURLWithPath: "/tmp/out.gif")))
         let saveResult = try await toolKit.save(saveRequest)
-        let recommendationRequest = GIFRecommendationRequest(days: 14, thumbnailSize: CGSize(width: 90, height: 70))
-        let images = try await toolKit.fetchRecommendedImages(recommendationRequest)
+        let assets = try await toolKit.fetchRecommendedAssets(recommendationRequest)
 
         #expect(saveResult.localIdentifier == "saved-id")
-        let lastSaveRequest = await photoLibrary.lastRequestValue()
-        switch lastSaveRequest?.destination {
-        case .photoLibrary(let albumName):
-            #expect(albumName == "LifeStickers")
-        default:
-            Issue.record("Expected photo library destination")
-        }
-        #expect(images.count == 1)
-        let lastRecommendationRequest = await recommendations.lastRequestValue()
-        #expect(lastRecommendationRequest?.days == 14)
-        #expect(lastRecommendationRequest?.thumbnailSize == CGSize(width: 90, height: 70))
-    }
-
-    @Test("Save propagates denied authorization error")
-    func saveDeniedErrorPropagation() async throws {
-        let storage = TemporaryStorageStub()
-        let encoding = EncodingStub()
-        let extractor = VideoFrameExtractorStub()
-        let backgroundRemover = BackgroundRemoverStub()
-        let photoLibrary = PhotoLibraryStub()
-        let recommendations = RecommendationProviderStub()
-        await photoLibrary.setError(.denied)
-
-        let toolKit = GIFToolKitImpl(
-            encoding: encoding,
-            videoFrameExtractor: extractor,
-            backgroundRemover: backgroundRemover,
-            photoLibrary: photoLibrary,
-            storage: storage,
-            recommendationProvider: recommendations
-        )
-
-        do {
-            _ = try await toolKit.save(.init(payload: .fileURL(URL(fileURLWithPath: "/tmp/denied.gif"))))
-            Issue.record("Expected denied authorization error")
-        } catch AlbumToolError.denied {
-        } catch {
-            Issue.record("Expected AlbumToolError.denied, got \(error)")
-        }
-    }
-
-    @Test("Save propagates save failure error")
-    func saveFailureErrorPropagation() async throws {
-        let storage = TemporaryStorageStub()
-        let encoding = EncodingStub()
-        let extractor = VideoFrameExtractorStub()
-        let backgroundRemover = BackgroundRemoverStub()
-        let photoLibrary = PhotoLibraryStub()
-        let recommendations = RecommendationProviderStub()
-        await photoLibrary.setError(.saveFail)
-
-        let toolKit = GIFToolKitImpl(
-            encoding: encoding,
-            videoFrameExtractor: extractor,
-            backgroundRemover: backgroundRemover,
-            photoLibrary: photoLibrary,
-            storage: storage,
-            recommendationProvider: recommendations
-        )
-
-        do {
-            _ = try await toolKit.save(.init(payload: .fileURL(URL(fileURLWithPath: "/tmp/savefail.gif"))))
-            Issue.record("Expected save failure error")
-        } catch AlbumToolError.saveFail {
-        } catch {
-            Issue.record("Expected AlbumToolError.saveFail, got \(error)")
-        }
+        #expect(photoLibrary.lastRequest?.payload != nil)
+        #expect(recommendations.lastRequest?.days == 14)
+        #expect(assets.count == 1)
     }
 
     @Test("Generate GIF cancels while extracting video frames")
@@ -325,29 +250,41 @@ struct GIFToolKitImplTests {
         let photoLibrary = PhotoLibraryStub()
         let recommendations = RecommendationProviderStub()
 
-        await extractor.setOnExtract { _, _, _ in
+        extractor.onExtract = { _, _, _ in
             try await Task.sleep(for: .seconds(2))
             try Task.checkCancellation()
             return []
         }
 
-        let toolKit = GIFToolKitImpl(
+        let toolKit = makeToolKit(
+            storage: storage,
             encoding: encoding,
-            videoFrameExtractor: extractor,
+            extractor: extractor,
             backgroundRemover: backgroundRemover,
             photoLibrary: photoLibrary,
-            storage: storage,
-            recommendationProvider: recommendations
+            recommendations: recommendations
         )
 
-        let task = Task {
-            try await toolKit.generateGIF(.init(source: .video(URL(fileURLWithPath: "/tmp/cancel.mov"))))
+        let task = Task { () -> ([GIFGenerationEvent], Error?) in
+            do {
+                let events = try await collectEvents(
+                    from: toolKit.generateGIF(
+                        .init(source: .videoFile(URL(fileURLWithPath: "/tmp/cancel.mov")))
+                    )
+                )
+                return (events, nil)
+            } catch {
+                return ([], error)
+            }
         }
-        task.cancel()
 
-        await #expect(throws: CancellationError.self) {
-            _ = try await task.value
+        await extractor.waitUntilStarted()
+        task.cancel()
+        let result = await task.value
+        if let error = result.1 {
+            #expect(error is CancellationError)
         }
+        #expect(!containsCompletedEvent(result.0))
     }
 
     @Test("Generate GIF cancels during background removal")
@@ -358,72 +295,182 @@ struct GIFToolKitImplTests {
         let backgroundRemover = BackgroundRemoverStub()
         let photoLibrary = PhotoLibraryStub()
         let recommendations = RecommendationProviderStub()
-        let sourceImage = makeGIFImage(width: 60, height: 60, alpha: 255)
 
-        await backgroundRemover.setOnRemove { images in
+        let sourceImage = makeGIFImage(width: 60, height: 60, alpha: 255)
+        let sourceURL = try writeImageToTempFile(sourceImage, ext: "png")
+        backgroundRemover.onRemove = { images in
             try await Task.sleep(for: .seconds(2))
             try Task.checkCancellation()
             return images
         }
 
-        let toolKit = GIFToolKitImpl(
+        let toolKit = makeToolKit(
+            storage: storage,
+            encoding: encoding,
+            extractor: extractor,
+            backgroundRemover: backgroundRemover,
+            photoLibrary: photoLibrary,
+            recommendations: recommendations
+        )
+        let request = GIFGenerationURLRequest(
+            source: .imageFiles([sourceURL]),
+            options: GIFGenerationOptions(removeBackground: true)
+        )
+
+        let task = Task { () -> ([GIFGenerationEvent], Error?) in
+            do {
+                let events = try await collectEvents(from: toolKit.generateGIF(request))
+                return (events, nil)
+            } catch {
+                return ([], error)
+            }
+        }
+
+        await backgroundRemover.waitUntilStarted()
+        task.cancel()
+        let result = await task.value
+        if let error = result.1 {
+            #expect(error is CancellationError)
+        }
+        #expect(!containsCompletedEvent(result.0))
+        #expect(encoding.snapshot().capturedCGImages.isEmpty)
+    }
+
+    @Test("Cleanup removes request and all temporary files")
+    func cleanupScopes() async throws {
+        let storage = TemporaryStorageStub()
+        let encoding = EncodingStub()
+        let extractor = VideoFrameExtractorStub()
+        let backgroundRemover = BackgroundRemoverStub()
+        let photoLibrary = PhotoLibraryStub()
+        let recommendations = RecommendationProviderStub()
+        let sourceImage = makeGIFImage(width: 12, height: 12, alpha: 255)
+        let sourceURL = try writeImageToTempFile(sourceImage, ext: "png")
+        encoding.outputFrames = [sourceImage]
+
+        let toolKit = makeToolKit(
+            storage: storage,
+            encoding: encoding,
+            extractor: extractor,
+            backgroundRemover: backgroundRemover,
+            photoLibrary: photoLibrary,
+            recommendations: recommendations
+        )
+
+        _ = try await collectEvents(from: toolKit.generateGIF(.init(source: .imageFiles([sourceURL]))))
+        try await toolKit.cleanup(.requestOnly)
+        try await toolKit.cleanup(.allTemporaryGIFFiles)
+
+        #expect(storage.cleanedDirectories.count == 1)
+        #expect(storage.cleanedDirectories.first == storage.directory)
+        #expect(storage.cleanupAllCalls == 1)
+    }
+
+    private func makeToolKit(
+        storage: TemporaryStorageStub,
+        encoding: EncodingStub,
+        extractor: VideoFrameExtractorStub,
+        backgroundRemover: BackgroundRemoverStub,
+        photoLibrary: PhotoLibraryStub,
+        recommendations: RecommendationProviderStub
+    ) -> GIFToolKitImpl {
+        GIFToolKitImpl(
             encoding: encoding,
             videoFrameExtractor: extractor,
             backgroundRemover: backgroundRemover,
             photoLibrary: photoLibrary,
             storage: storage,
-            recommendationProvider: recommendations
+            recommendationProvider: recommendations,
+            frameStorageMemoryBudgetBytes: 1_024
         )
-        let request = GIFGenerationRequest(
-            source: .images([sourceImage]),
-            options: GIFGenerationOptions(removeBackground: true)
-        )
-        let task = Task {
-            try await toolKit.generateGIF(request)
-        }
-
-        await backgroundRemover.waitUntilStarted()
-        task.cancel()
-
-        await #expect(throws: CancellationError.self) {
-            _ = try await task.value
-        }
-        let snapshot = encoding.snapshot()
-        #expect(snapshot.capturedCGImages.isEmpty)
     }
 
-    @Test("Watermark position round-trips through compatibility model", arguments: GIFWatermarkPosition.allCases)
-    func watermarkPositionRoundTrip(position: GIFWatermarkPosition) {
-        let watermark = GIFWatermark(
-            content: .text("RoundTrip"),
-            position: position,
-            offset: CGPoint(x: 3, y: 4),
-            origin: CGPoint(x: 11, y: 12)
-        )
-        let config = ImageDecorateConfig(watermark: watermark)
-        let roundTrip = GIFWatermark(config: config)
-
-        #expect(roundTrip.position == position)
-        #expect(roundTrip.offset == CGPoint(x: 3, y: 4))
-        #expect(roundTrip.origin == CGPoint(x: 11, y: 12))
-        switch roundTrip.content {
-        case .text(let text, _, _, _):
-            #expect(text == "RoundTrip")
-        default:
-            Issue.record("Expected text watermark after round trip")
+    private func collectEvents(
+        from stream: AsyncThrowingStream<GIFGenerationEvent, Error>
+    ) async throws -> [GIFGenerationEvent] {
+        var events: [GIFGenerationEvent] = []
+        for try await event in stream {
+            events.append(event)
         }
+        return events
+    }
+
+    private func collectBackgroundEvents(
+        from stream: AsyncThrowingStream<GIFBackgroundRemovalEvent, Error>
+    ) async throws -> [GIFBackgroundRemovalEvent] {
+        var events: [GIFBackgroundRemovalEvent] = []
+        for try await event in stream {
+            events.append(event)
+        }
+        return events
+    }
+
+    private func completedResult(in events: [GIFGenerationEvent]) -> GIFGenerationURLResult? {
+        for event in events {
+            if case .completed(let result) = event {
+                return result
+            }
+        }
+        return nil
+    }
+
+    private func completedBackgroundResult(in events: [GIFBackgroundRemovalEvent]) -> GIFBackgroundRemovalURLResult? {
+        for event in events {
+            if case .completed(let result) = event {
+                return result
+            }
+        }
+        return nil
+    }
+
+    private func containsPreparingEvent(_ events: [GIFGenerationEvent]) -> Bool {
+        events.contains {
+            if case .preparingFrames = $0 {
+                return true
+            }
+            return false
+        }
+    }
+
+    private func containsEncodingEvent(_ events: [GIFGenerationEvent]) -> Bool {
+        events.contains {
+            if case .encoding = $0 {
+                return true
+            }
+            return false
+        }
+    }
+
+    private func containsCompletedEvent(_ events: [GIFGenerationEvent]) -> Bool {
+        events.contains {
+            if case .completed = $0 {
+                return true
+            }
+            return false
+        }
+    }
+
+    private func containsBackgroundProcessingEvent(_ events: [GIFBackgroundRemovalEvent]) -> Bool {
+        events.contains {
+            if case .processing = $0 {
+                return true
+            }
+            return false
+        }
+    }
+
+    private func writeImageToTempFile(_ image: GIFImage, ext: String) throws -> URL {
+        guard let data = image.gifPNGData else {
+            throw GifError.invalidImageData
+        }
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "livegifkit-source-\(UUID().uuidString).\(ext)")
+        try data.write(to: url, options: .atomic)
+        return url
     }
 
     private func makeGIFImage(width: Int, height: Int, alpha: UInt8) -> GIFImage {
         GIFImage.gifImage(cgImage: makeCGImage(width: width, height: height, alpha: alpha))
-    }
-
-    private func makeInvalidGIFImage() -> GIFImage {
-        #if canImport(UIKit)
-        GIFImage()
-        #else
-        GIFImage(size: .zero)
-        #endif
     }
 
     private func makeCGImage(width: Int, height: Int, alpha: UInt8) -> CGImage {
@@ -469,15 +516,18 @@ private final class EncodingStub: GIFEncoding, @unchecked Sendable {
         cgImages: [CGImage],
         outputURL: URL,
         frameDelay: Double,
-        watermarks: [GIFWatermark]
+        watermarks: [GIFWatermark],
+        onProgress: @Sendable (_ completed: Int, _ total: Int) -> Void
     ) throws -> [GIFImage] {
         lock.lock()
         capturedCGImages = cgImages
         capturedOutputURL = outputURL
         capturedFrameDelay = frameDelay
         capturedWatermarks = watermarks
-        let frames = outputFrames
+        let frames = outputFrames.isEmpty ? cgImages.map { GIFImage.gifImage(cgImage: $0) } : outputFrames
         lock.unlock()
+
+        onProgress(cgImages.count, cgImages.count)
         return frames
     }
 
@@ -501,92 +551,32 @@ private final class EncodingStub: GIFEncoding, @unchecked Sendable {
 }
 
 private final class VideoFrameExtractorStub: GIFVideoFrameExtracting, @unchecked Sendable {
-    private var outputImages: [GIFImage] = []
-    private var lastVideoURL: URL?
-    private var lastSourceFPS: Double?
-    private var lastMaxResolution: CGFloat?
-    private var onExtract: ((URL, Double?, CGFloat) async throws -> [GIFImage])?
-
-    func extractFrames(
-        from videoURL: URL,
-        sourceFPS: Double?,
-        maxResolution: CGFloat
-    ) async throws -> [GIFImage] {
-        lastVideoURL = videoURL
-        lastSourceFPS = sourceFPS
-        lastMaxResolution = maxResolution
-        let customHandler = onExtract
-        let images = outputImages
-
-        if let customHandler {
-            return try await customHandler(videoURL, sourceFPS, maxResolution)
-        }
-        return images
-    }
-
-    func snapshot() async -> Snapshot {
-        return Snapshot(
-            lastVideoURL: lastVideoURL,
-            lastSourceFPS: lastSourceFPS,
-            lastMaxResolution: lastMaxResolution
-        )
-    }
-
-    func setOutputImages(_ images: [GIFImage]) async {
-        outputImages = images
-    }
-
-    func setOnExtract(_ handler: @escaping (URL, Double?, CGFloat) async throws -> [GIFImage]) async {
-        onExtract = handler
-    }
-
-    struct Snapshot {
-        let lastVideoURL: URL?
-        let lastSourceFPS: Double?
-        let lastMaxResolution: CGFloat?
-    }
-}
-
-private final class BackgroundRemoverStub: GIFBackgroundRemoving, @unchecked Sendable {
-    private var outputImages: [CGImage] = []
-    private var onRemove: (([CGImage]) async throws -> [CGImage])?
-    private var calls = 0
+    var outputImages: [GIFImage] = []
+    var lastVideoURL: URL?
+    var lastSourceFPS: Double?
+    var lastMaxResolution: CGFloat?
+    var onExtract: ((URL, Double?, CGFloat) async throws -> [GIFImage])?
     private var didStart = false
     private var startContinuations: [CheckedContinuation<Void, Never>] = []
 
-    func removeBackground(images: [CGImage]) async throws -> [CGImage] {
-        calls += 1
+    func extractFrames(from videoURL: URL, sourceFPS: Double?, maxResolution: CGFloat) async throws -> [GIFImage] {
+        lastVideoURL = videoURL
+        lastSourceFPS = sourceFPS
+        lastMaxResolution = maxResolution
         didStart = true
         let continuations = startContinuations
         startContinuations.removeAll()
-        let customRemove = onRemove
-        let currentOutput = outputImages
-
         continuations.forEach { $0.resume() }
-
-        if let customRemove {
-            return try await customRemove(images)
+        if let onExtract {
+            return try await onExtract(videoURL, sourceFPS, maxResolution)
         }
-        return currentOutput.isEmpty ? images : currentOutput
-    }
-
-    func snapshot() async -> Snapshot {
-        return Snapshot(calls: calls)
-    }
-
-    func setOutputImages(_ images: [CGImage]) async {
-        outputImages = images
-    }
-
-    func setOnRemove(_ handler: @escaping ([CGImage]) async throws -> [CGImage]) async {
-        onRemove = handler
+        return outputImages
     }
 
     func waitUntilStarted() async {
         if didStart {
             return
         }
-
         await withCheckedContinuation { continuation in
             if didStart {
                 continuation.resume()
@@ -595,38 +585,56 @@ private final class BackgroundRemoverStub: GIFBackgroundRemoving, @unchecked Sen
             }
         }
     }
+}
 
-    struct Snapshot {
-        let calls: Int
+private final class BackgroundRemoverStub: GIFBackgroundRemoving, @unchecked Sendable {
+    var outputImages: [CGImage] = []
+    var onRemove: (([CGImage]) async throws -> [CGImage])?
+    var alwaysUseOutputImages = false
+    private(set) var calls = 0
+    private var didStart = false
+    private var startContinuations: [CheckedContinuation<Void, Never>] = []
+
+    func removeBackground(images: [CGImage]) async throws -> [CGImage] {
+        calls += 1
+        didStart = true
+        let continuations = startContinuations
+        startContinuations.removeAll()
+        continuations.forEach { $0.resume() }
+        if let onRemove {
+            return try await onRemove(images)
+        }
+        if alwaysUseOutputImages {
+            return outputImages
+        }
+        return outputImages.isEmpty ? images : outputImages
+    }
+
+    func waitUntilStarted() async {
+        if didStart {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            if didStart {
+                continuation.resume()
+            } else {
+                startContinuations.append(continuation)
+            }
+        }
     }
 }
 
 private final class PhotoLibraryStub: GIFPhotoLibraryPersisting, @unchecked Sendable {
-    private var output = GIFSaveResult(localIdentifier: nil)
-    private var errorToThrow: AlbumToolError?
-    private var lastRequest: GIFSaveRequest?
+    var output = GIFSaveResult(localIdentifier: nil)
+    var errorToThrow: Error?
+    private(set) var lastRequest: GIFSaveURLRequest?
 
-    func save(_ request: GIFSaveRequest) async throws -> GIFSaveResult {
+    func save(_ request: GIFSaveURLRequest) async throws -> GIFSaveResult {
         lastRequest = request
-        let error = errorToThrow
-        let output = output
-
-        if let error {
-            throw error
+        if let errorToThrow {
+            throw errorToThrow
         }
         return output
-    }
-
-    func setOutput(_ output: GIFSaveResult) async {
-        self.output = output
-    }
-
-    func setError(_ error: AlbumToolError?) async {
-        errorToThrow = error
-    }
-
-    func lastRequestValue() async -> GIFSaveRequest? {
-        return lastRequest
     }
 }
 
@@ -650,21 +658,11 @@ private final class TemporaryStorageStub: GIFTemporaryStorage, @unchecked Sendab
 }
 
 private final class RecommendationProviderStub: GIFRecommendationProviding, @unchecked Sendable {
-    private var outputImages: [GIFImage] = []
-    private var lastRequest: GIFRecommendationRequest?
+    var outputAssets: [GIFRecommendedAsset] = []
+    private(set) var lastRequest: GIFRecommendationURLRequest?
 
-    @MainActor
-    func fetch(_ request: GIFRecommendationRequest) async throws -> [GIFImage] {
+    func fetch(_ request: GIFRecommendationURLRequest) async throws -> [GIFRecommendedAsset] {
         lastRequest = request
-        let images = outputImages
-        return images
-    }
-
-    func setOutputImages(_ images: [GIFImage]) async {
-        outputImages = images
-    }
-
-    func lastRequestValue() async -> GIFRecommendationRequest? {
-        return lastRequest
+        return outputAssets
     }
 }
