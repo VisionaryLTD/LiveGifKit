@@ -21,6 +21,13 @@ internal protocol GIFVideoFrameExtracting: Sendable {
         from videoURL: URL,
         policy: GIFFrameExtractionPolicy
     ) async throws -> GIFVideoExtractionOutput
+
+    func extractFrameFiles(
+        from videoURL: URL,
+        policy: GIFFrameExtractionPolicy,
+        outputDirectory: URL,
+        frameFilePrefix: String
+    ) async throws -> GIFVideoFrameFileExtractionOutput
 }
 
 internal protocol GIFBackgroundRemoving: Sendable {
@@ -76,6 +83,58 @@ internal struct GIFVideoExtractionOutput: @unchecked Sendable {
         self.effectiveSourceFPS = effectiveSourceFPS
         self.effectiveMaxResolution = effectiveMaxResolution
         self.estimatedDecodeBytes = estimatedDecodeBytes
+    }
+}
+
+internal struct GIFVideoFrameFileExtractionOutput: Sendable {
+    let frameURLs: [URL]
+    let pixelSize: CGSize
+    let effectiveSourceFPS: Double
+    let effectiveMaxResolution: CGFloat
+    let estimatedDecodeBytes: Int
+}
+
+extension GIFVideoFrameExtracting {
+    func extractFrameFiles(
+        from videoURL: URL,
+        policy: GIFFrameExtractionPolicy,
+        outputDirectory: URL,
+        frameFilePrefix: String
+    ) async throws -> GIFVideoFrameFileExtractionOutput {
+        let output = try await extractFrames(
+            from: videoURL,
+            policy: policy
+        )
+
+        if FileManager.default.fileExists(atPath: outputDirectory.path) {
+            try FileManager.default.removeItem(at: outputDirectory)
+        }
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+        var frameURLs: [URL] = []
+        frameURLs.reserveCapacity(output.frames.count)
+        var pixelSize = CGSize.zero
+
+        for (index, frame) in output.frames.enumerated() {
+            try Task.checkCancellation()
+            guard let data = frame.gifPNGData else {
+                throw GifError.invalidImageData
+            }
+            let frameURL = outputDirectory.appending(path: "\(frameFilePrefix)-\(String(format: "%04d", index)).png")
+            try data.write(to: frameURL, options: .atomic)
+            if index == 0 {
+                pixelSize = frame.size
+            }
+            frameURLs.append(frameURL)
+        }
+
+        return GIFVideoFrameFileExtractionOutput(
+            frameURLs: frameURLs,
+            pixelSize: pixelSize,
+            effectiveSourceFPS: output.effectiveSourceFPS,
+            effectiveMaxResolution: output.effectiveMaxResolution,
+            estimatedDecodeBytes: output.estimatedDecodeBytes
+        )
     }
 }
 
@@ -490,6 +549,103 @@ internal struct GIFVideoFrameExtractorLive: GIFVideoFrameExtracting {
         from videoURL: URL,
         policy: GIFFrameExtractionPolicy
     ) async throws -> GIFVideoExtractionOutput {
+        let context = try await makeExtractionContext(
+            from: videoURL,
+            policy: policy
+        )
+
+        var images: [GIFImage] = []
+        images.reserveCapacity(context.frameCount)
+        for time in context.times {
+            try Task.checkCancellation()
+            let cgImage = try context.generator.copyCGImage(at: time.timeValue, actualTime: nil)
+            let resized = GIFImage.gifImage(cgImage: cgImage).resize(width: context.effectiveLongEdge)
+            images.append(resized)
+        }
+
+        return GIFVideoExtractionOutput(
+            frames: images,
+            effectiveSourceFPS: context.effectiveSourceFPS,
+            effectiveMaxResolution: context.effectiveLongEdge,
+            estimatedDecodeBytes: context.estimatedDecodeBytes
+        )
+    }
+
+    func extractFrameFiles(
+        from videoURL: URL,
+        policy: GIFFrameExtractionPolicy,
+        outputDirectory: URL,
+        frameFilePrefix: String
+    ) async throws -> GIFVideoFrameFileExtractionOutput {
+        let context = try await makeExtractionContext(
+            from: videoURL,
+            policy: policy
+        )
+
+        if FileManager.default.fileExists(atPath: outputDirectory.path) {
+            try FileManager.default.removeItem(at: outputDirectory)
+        }
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+        var frameURLs: [URL] = []
+        frameURLs.reserveCapacity(context.frameCount)
+        var pixelSize = CGSize.zero
+
+        for (index, time) in context.times.enumerated() {
+            try Task.checkCancellation()
+
+            let cgImage = try context.generator.copyCGImage(at: time.timeValue, actualTime: nil)
+            let resized = GIFImage.gifImage(cgImage: cgImage).resize(width: context.effectiveLongEdge)
+            if index == 0 {
+                pixelSize = resized.size
+            }
+            guard let pngData = resized.gifPNGData else {
+                throw GifError.invalidImageData
+            }
+
+            let frameURL = outputDirectory.appending(path: "\(frameFilePrefix)-\(String(format: "%04d", index)).png")
+            try pngData.write(to: frameURL, options: .atomic)
+            frameURLs.append(frameURL)
+        }
+
+        return GIFVideoFrameFileExtractionOutput(
+            frameURLs: frameURLs,
+            pixelSize: pixelSize,
+            effectiveSourceFPS: context.effectiveSourceFPS,
+            effectiveMaxResolution: context.effectiveLongEdge,
+            estimatedDecodeBytes: context.estimatedDecodeBytes
+        )
+    }
+
+    private func clampedFrameCount(
+        durationSeconds: Double,
+        sourceFPS: Double,
+        maxFrameCount: Int
+    ) -> Int {
+        let calculated = Int((durationSeconds * sourceFPS).rounded(.down))
+        return max(1, min(maxFrameCount, calculated))
+    }
+
+    private func estimatedDecodeBytes(
+        frameCount: Int,
+        sourceSize: CGSize,
+        effectiveLongEdge: CGFloat
+    ) -> Int {
+        let sourceLongEdge = max(sourceSize.width, sourceSize.height)
+        guard sourceLongEdge > 0 else {
+            return 0
+        }
+        let scale = min(1, effectiveLongEdge / sourceLongEdge)
+        let width = max(1, sourceSize.width * scale)
+        let height = max(1, sourceSize.height * scale)
+        let bytes = Double(frameCount) * Double(width * height * 4)
+        return Int(bytes.rounded(.up))
+    }
+
+    private func makeExtractionContext(
+        from videoURL: URL,
+        policy: GIFFrameExtractionPolicy
+    ) async throws -> ExtractionContext {
         let asset = AVURLAsset(url: videoURL)
         let duration = try await asset.load(.duration)
         let seconds = duration.seconds
@@ -564,50 +720,28 @@ internal struct GIFVideoFrameExtractorLive: GIFVideoFrameExtracting {
             times.append(NSValue(time: value))
         }
 
-        var images: [GIFImage] = []
-        images.reserveCapacity(frameCount)
-        for time in times {
-            try Task.checkCancellation()
-            let cgImage = try generator.copyCGImage(at: time.timeValue, actualTime: nil)
-            let resized = GIFImage.gifImage(cgImage: cgImage).resize(width: effectiveLongEdge)
-            images.append(resized)
-        }
         let estimatedBytes = estimatedDecodeBytes(
             frameCount: frameCount,
             sourceSize: CGSize(width: sourceWidth, height: sourceHeight),
             effectiveLongEdge: effectiveLongEdge
         )
-        return GIFVideoExtractionOutput(
-            frames: images,
+        return ExtractionContext(
+            generator: generator,
+            times: times,
+            frameCount: frameCount,
             effectiveSourceFPS: effectiveSourceFPS,
-            effectiveMaxResolution: effectiveLongEdge,
+            effectiveLongEdge: effectiveLongEdge,
             estimatedDecodeBytes: estimatedBytes
         )
     }
 
-    private func clampedFrameCount(
-        durationSeconds: Double,
-        sourceFPS: Double,
-        maxFrameCount: Int
-    ) -> Int {
-        let calculated = Int((durationSeconds * sourceFPS).rounded(.down))
-        return max(1, min(maxFrameCount, calculated))
-    }
-
-    private func estimatedDecodeBytes(
-        frameCount: Int,
-        sourceSize: CGSize,
-        effectiveLongEdge: CGFloat
-    ) -> Int {
-        let sourceLongEdge = max(sourceSize.width, sourceSize.height)
-        guard sourceLongEdge > 0 else {
-            return 0
-        }
-        let scale = min(1, effectiveLongEdge / sourceLongEdge)
-        let width = max(1, sourceSize.width * scale)
-        let height = max(1, sourceSize.height * scale)
-        let bytes = Double(frameCount) * Double(width * height * 4)
-        return Int(bytes.rounded(.up))
+    private struct ExtractionContext {
+        let generator: AVAssetImageGenerator
+        let times: [NSValue]
+        let frameCount: Int
+        let effectiveSourceFPS: Double
+        let effectiveLongEdge: CGFloat
+        let estimatedDecodeBytes: Int
     }
 }
 

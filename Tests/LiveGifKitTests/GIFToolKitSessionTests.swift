@@ -56,6 +56,126 @@ struct GIFToolKitSessionTests {
         #expect(session.previewPreparationCount == 1)
     }
 
+    @Test("Video preview uses streaming file extraction path")
+    func videoPreviewUsesStreamingFileExtractionPath() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        extractor.outputImages = [makeGIFImage(width: 100, height: 70, alpha: 255)]
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let sourceURL = try makeTempFileURL(ext: "mov")
+
+        var attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        attributes.maxResolution = 360
+        session.attributes = attributes
+        await waitUntil { !session.previewFrameURLs.isEmpty }
+
+        #expect(extractor.fileExtractionCallCount() == 1)
+        #expect(extractor.frameExtractionCallCount() == 0)
+    }
+
+    @Test("Preview progressively appears before full preparation completes")
+    func previewProgressiveAvailability() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let sourceURL = try makeTempFileURL(ext: "mov")
+
+        let lock = NSLock()
+        var continuation: CheckedContinuation<Void, Never>?
+        extractor.onExtractFiles = { _, policy, outputDirectory, frameFilePrefix in
+            if FileManager.default.fileExists(atPath: outputDirectory.path) {
+                try FileManager.default.removeItem(at: outputDirectory)
+            }
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+            var frameURLs: [URL] = []
+            for index in 0..<6 {
+                let frame = makeGIFImage(width: 360, height: 240, alpha: 255).resize(width: policy.maxResolution)
+                guard let data = frame.gifPNGData else {
+                    throw GifError.invalidImageData
+                }
+                let frameURL = outputDirectory.appending(path: "\(frameFilePrefix)-\(String(format: "%04d", index)).png")
+                try data.write(to: frameURL, options: .atomic)
+                frameURLs.append(frameURL)
+
+                if index == 1 {
+                    await withCheckedContinuation { (resume: CheckedContinuation<Void, Never>) in
+                        lock.withLock {
+                            continuation = resume
+                        }
+                    }
+                }
+                try await Task.sleep(for: .milliseconds(40))
+            }
+
+            return GIFVideoFrameFileExtractionOutput(
+                frameURLs: frameURLs,
+                pixelSize: CGSize(width: 360, height: 240),
+                effectiveSourceFPS: policy.sourceFPS ?? 12,
+                effectiveMaxResolution: policy.maxResolution,
+                estimatedDecodeBytes: frameURLs.count * 1024
+            )
+        }
+
+        session.attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        await waitUntil(timeout: .seconds(3)) { session.previewFrameURLs.count >= 2 }
+        #expect(session.previewFrameURLs.count >= 2)
+        #expect(session.isPreparingPreview)
+
+        lock.withLock {
+            continuation?.resume()
+            continuation = nil
+        }
+
+        await waitUntil(timeout: .seconds(3)) {
+            !session.isPreparingPreview && session.previewFrameURLs.count == 6
+        }
+        #expect(session.previewFrameURLs.count == 6)
+    }
+
+    @Test("Streaming preview fails when extractor returns empty frames")
+    func streamingPreviewFailsOnEmptyFrameOutput() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let sourceURL = try makeTempFileURL(ext: "mov")
+
+        extractor.onExtractFiles = { _, policy, outputDirectory, _ in
+            if FileManager.default.fileExists(atPath: outputDirectory.path) {
+                try FileManager.default.removeItem(at: outputDirectory)
+            }
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+            return GIFVideoFrameFileExtractionOutput(
+                frameURLs: [],
+                pixelSize: .zero,
+                effectiveSourceFPS: policy.sourceFPS ?? 0,
+                effectiveMaxResolution: policy.maxResolution,
+                estimatedDecodeBytes: 0
+            )
+        }
+
+        session.attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        await waitUntil(timeout: .seconds(3)) { session.previewState == .failed }
+
+        #expect(session.previewState == .failed)
+        #expect(session.previewFrameURLs.isEmpty)
+    }
+
     @Test("Cache hit reuses preview frames without re-preparing")
     func cacheHitReusesPreview() async throws {
         let recorder = SessionRecorderGIFToolKit()
@@ -122,24 +242,28 @@ struct GIFToolKitSessionTests {
         )
         let sourceURL = try makeTempFileURL(ext: "mov")
 
-        let lock = NSLock()
-        var continuation: CheckedContinuation<Void, Never>?
-        extractor.onExtract = { _, _ in
-            await withCheckedContinuation { (resume: CheckedContinuation<Void, Never>) in
-                lock.withLock {
-                    continuation = resume
-                }
+        extractor.onExtractFiles = { _, policy, outputDirectory, frameFilePrefix in
+            try await Task.sleep(for: .milliseconds(350))
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+            let frame = makeGIFImage(width: 120, height: 80, alpha: 255).resize(width: policy.maxResolution)
+            guard let data = frame.gifPNGData else {
+                throw GifError.invalidImageData
             }
-            return GIFVideoExtractionOutput(
-                frames: [makeGIFImage(width: 120, height: 80, alpha: 255)],
+            let frameURL = outputDirectory.appending(path: "\(frameFilePrefix)-0000.png")
+            try data.write(to: frameURL, options: .atomic)
+            return GIFVideoFrameFileExtractionOutput(
+                frameURLs: [frameURL],
+                pixelSize: frame.size,
                 effectiveSourceFPS: 12,
-                effectiveMaxResolution: 120,
+                effectiveMaxResolution: policy.maxResolution,
                 estimatedDecodeBytes: 120 * 80 * 4
             )
         }
 
-        session.attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
-        await waitUntil { extractor.callCount() == 1 }
+        var attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        attributes.maxResolution = 360
+        session.attributes = attributes
+        await waitUntil { extractor.callCount() == 1 && session.isPreparingPreview }
 
         let saveTask = Task {
             try await session.saveLatestGIF()
@@ -148,11 +272,6 @@ struct GIFToolKitSessionTests {
         try? await Task.sleep(for: .milliseconds(120))
         #expect(encoder.callCount() == 0)
         #expect(recorder.saveCallCount() == 0)
-
-        lock.withLock {
-            continuation?.resume()
-            continuation = nil
-        }
 
         _ = try await saveTask.value
         #expect(encoder.callCount() == 1)
@@ -290,7 +409,7 @@ struct GIFToolKitSessionTests {
         await waitUntil { !session.previewFrameURLs.isEmpty }
         let policy = try #require(extractor.lastPolicy())
         #expect(policy.sourceFPS == 18)
-        #expect(policy.maxResolution == 640)
+        #expect(policy.maxResolution == 420)
         #expect(policy.maxFrameCount == 42)
         #expect(policy.decodeMemoryBudgetBytes == 24 * 1024 * 1024)
     }
@@ -330,6 +449,36 @@ struct GIFToolKitSessionTests {
         #expect(session.generationResult?.frameCount == extractor.outputImages.count)
         let policy = try #require(extractor.lastPolicy())
         #expect(policy.sourceFPS == 18)
+    }
+
+    @Test("Save prepares export quality separately when preview is downsampled")
+    func savePreparesExportQualitySeparately() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        extractor.outputImages = [makeGIFImage(width: 900, height: 700, alpha: 255)]
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let sourceURL = try makeTempFileURL(ext: "mov")
+
+        var attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        attributes.maxResolution = 900
+        attributes.exportMaxLongEdge = nil
+        attributes.exportMaxFileSizeBytes = nil
+        session.attributes = attributes
+        await waitUntil { !session.previewFrameURLs.isEmpty }
+        _ = try await session.saveLatestGIF()
+
+        let policies = extractor.allPolicies()
+        #expect(policies.count >= 2)
+        let first = try #require(policies.first)
+        let second = try #require(policies.dropFirst().first)
+        #expect(first.maxResolution == 420)
+        #expect(second.maxResolution == 900)
+        #expect((session.lastExportPixelSize?.width ?? 0) >= 800)
     }
 
     @Test("Save without budget is unconstrained")
@@ -683,17 +832,21 @@ private final class SessionRecorderGIFToolKit: GIFToolKit, @unchecked Sendable {
 private final class SessionVideoFrameExtractorStub: GIFVideoFrameExtracting, @unchecked Sendable {
     private let lock = NSLock()
     var outputImages: [GIFImage] = []
-    var onExtract: ((URL, GIFFrameExtractionPolicy) async throws -> GIFVideoExtractionOutput)?
-    private var calls = 0
+    var onExtractFrames: ((URL, GIFFrameExtractionPolicy) async throws -> GIFVideoExtractionOutput)?
+    var onExtractFiles: ((URL, GIFFrameExtractionPolicy, URL, String) async throws -> GIFVideoFrameFileExtractionOutput)?
+    private var frameCalls = 0
+    private var fileCalls = 0
     private var latestPolicy: GIFFrameExtractionPolicy?
+    private var policyHistory: [GIFFrameExtractionPolicy] = []
 
     func extractFrames(from videoURL: URL, policy: GIFFrameExtractionPolicy) async throws -> GIFVideoExtractionOutput {
         lock.withLock {
-            calls += 1
+            frameCalls += 1
             latestPolicy = policy
+            policyHistory.append(policy)
         }
-        if let onExtract {
-            return try await onExtract(videoURL, policy)
+        if let onExtractFrames {
+            return try await onExtractFrames(videoURL, policy)
         }
         return GIFVideoExtractionOutput(
             frames: outputImages,
@@ -703,15 +856,87 @@ private final class SessionVideoFrameExtractorStub: GIFVideoFrameExtracting, @un
         )
     }
 
+    func extractFrameFiles(
+        from videoURL: URL,
+        policy: GIFFrameExtractionPolicy,
+        outputDirectory: URL,
+        frameFilePrefix: String
+    ) async throws -> GIFVideoFrameFileExtractionOutput {
+        lock.withLock {
+            fileCalls += 1
+            latestPolicy = policy
+            policyHistory.append(policy)
+        }
+
+        if let onExtractFiles {
+            return try await onExtractFiles(videoURL, policy, outputDirectory, frameFilePrefix)
+        }
+
+        if FileManager.default.fileExists(atPath: outputDirectory.path) {
+            try FileManager.default.removeItem(at: outputDirectory)
+        }
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+        let framesToWrite: [GIFImage]
+        if outputImages.isEmpty {
+            let edge = max(1, Int(policy.maxResolution.rounded()))
+            framesToWrite = [makeGIFImage(width: edge, height: edge, alpha: 255)]
+        } else {
+            framesToWrite = outputImages.map { $0.resize(width: policy.maxResolution) }
+        }
+
+        var frameURLs: [URL] = []
+        frameURLs.reserveCapacity(framesToWrite.count)
+        var pixelSize = CGSize.zero
+
+        for (index, frame) in framesToWrite.enumerated() {
+            guard let data = frame.gifPNGData else {
+                throw GifError.invalidImageData
+            }
+            let frameURL = outputDirectory.appending(path: "\(frameFilePrefix)-\(String(format: "%04d", index)).png")
+            try data.write(to: frameURL, options: .atomic)
+            frameURLs.append(frameURL)
+            if index == 0 {
+                pixelSize = frame.size
+            }
+        }
+
+        return GIFVideoFrameFileExtractionOutput(
+            frameURLs: frameURLs,
+            pixelSize: pixelSize,
+            effectiveSourceFPS: policy.sourceFPS ?? 0,
+            effectiveMaxResolution: policy.maxResolution,
+            estimatedDecodeBytes: max(framesToWrite.count, 1) * 1024
+        )
+    }
+
     func callCount() -> Int {
         lock.withLock {
-            calls
+            frameCalls + fileCalls
+        }
+    }
+
+    func fileExtractionCallCount() -> Int {
+        lock.withLock {
+            fileCalls
+        }
+    }
+
+    func frameExtractionCallCount() -> Int {
+        lock.withLock {
+            frameCalls
         }
     }
 
     func lastPolicy() -> GIFFrameExtractionPolicy? {
         lock.withLock {
             latestPolicy
+        }
+    }
+
+    func allPolicies() -> [GIFFrameExtractionPolicy] {
+        lock.withLock {
+            policyHistory
         }
     }
 }
