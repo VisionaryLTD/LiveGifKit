@@ -717,21 +717,37 @@ private extension GIFToolKitSession {
         frameDirectory: URL
     ) {
         previewProgressTask?.cancel()
-        previewProgressTask = Task { @MainActor [weak self] in
+        previewProgressTask = Task { [weak self] in
             guard let self else { return }
             var previousCount = 0
             while !Task.isCancelled {
-                guard previewTaskKey == key, isPreparingPreview else {
+                let isActive = await MainActor.run {
+                    previewTaskKey == key && isPreparingPreview
+                }
+                guard isActive else {
                     return
                 }
+
                 let frameURLs = discoverPreviewFrameURLs(in: frameDirectory)
                 if frameURLs.count > previousCount {
                     previousCount = frameURLs.count
-                    previewPrepareStage = .applyingEffects
-                    previewFrameURLs = frameURLs
-                    if previewPixelSize == nil, let firstFrameURL = frameURLs.first {
-                        if let image = GIFImage.gifImage(contentsOf: firstFrameURL) {
-                            previewPixelSize = image.size
+                    let firstFrameSize: CGSize?
+                    if let firstFrameURL = frameURLs.first,
+                        let image = GIFImage.gifImage(contentsOf: firstFrameURL)
+                    {
+                        firstFrameSize = image.size
+                    } else {
+                        firstFrameSize = nil
+                    }
+
+                    await MainActor.run {
+                        guard previewTaskKey == key, isPreparingPreview else {
+                            return
+                        }
+                        previewPrepareStage = .applyingEffects
+                        previewFrameURLs = frameURLs
+                        if previewPixelSize == nil, let firstFrameSize {
+                            previewPixelSize = firstFrameSize
                         }
                     }
                 }
@@ -740,7 +756,7 @@ private extension GIFToolKitSession {
         }
     }
 
-    func discoverPreviewFrameURLs(in frameDirectory: URL) -> [URL] {
+    nonisolated func discoverPreviewFrameURLs(in frameDirectory: URL) -> [URL] {
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: frameDirectory,
             includingPropertiesForKeys: nil,
@@ -1396,6 +1412,10 @@ private enum GIFPreviewPipeline {
             outputDirectory: extractionDirectory,
             frameFilePrefix: framePrefix
         )
+
+        guard !extractionOutput.frameURLs.isEmpty else {
+            throw GifError.gifResultNil
+        }
 
         if !shouldDecorateFrames {
             let bytesOnDisk = extractionOutput.frameURLs.reduce(into: 0) { partialResult, frameURL in

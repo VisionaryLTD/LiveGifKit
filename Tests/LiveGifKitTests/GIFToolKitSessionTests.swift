@@ -143,6 +143,39 @@ struct GIFToolKitSessionTests {
         #expect(session.previewFrameURLs.count == 6)
     }
 
+    @Test("Streaming preview fails when extractor returns empty frames")
+    func streamingPreviewFailsOnEmptyFrameOutput() async throws {
+        let recorder = SessionRecorderGIFToolKit()
+        let extractor = SessionVideoFrameExtractorStub()
+        let encoder = SessionEncodingStub()
+        let session = makeSession(
+            recorder: recorder,
+            extractor: extractor,
+            encoding: encoder
+        )
+        let sourceURL = try makeTempFileURL(ext: "mov")
+
+        extractor.onExtractFiles = { _, policy, outputDirectory, _ in
+            if FileManager.default.fileExists(atPath: outputDirectory.path) {
+                try FileManager.default.removeItem(at: outputDirectory)
+            }
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+            return GIFVideoFrameFileExtractionOutput(
+                frameURLs: [],
+                pixelSize: .zero,
+                effectiveSourceFPS: policy.sourceFPS ?? 0,
+                effectiveMaxResolution: policy.maxResolution,
+                estimatedDecodeBytes: 0
+            )
+        }
+
+        session.attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        await waitUntil(timeout: .seconds(3)) { session.previewState == .failed }
+
+        #expect(session.previewState == .failed)
+        #expect(session.previewFrameURLs.isEmpty)
+    }
+
     @Test("Cache hit reuses preview frames without re-preparing")
     func cacheHitReusesPreview() async throws {
         let recorder = SessionRecorderGIFToolKit()
