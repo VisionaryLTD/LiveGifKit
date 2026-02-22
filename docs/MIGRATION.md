@@ -46,6 +46,53 @@ let output = try await withDependencies {
 }
 ```
 
+## Session-based editor flow (new)
+
+For SwiftUI editor use-cases, prefer `GIFToolKitSession` instead of hand-rolling debounce/cancellation/cache logic:
+
+```swift
+import LiveGifKit
+
+@MainActor
+@Observable
+final class EditorViewModel {
+  let session: GIFToolKitSession
+
+  init(gifToolKit: any GIFToolKit) {
+    session = GIFToolKitSession(gifToolKit: gifToolKit)
+  }
+}
+```
+
+Bind UI controls to `session.attributes`:
+- `source`
+- `outputFPS`
+- `sourceFPS`
+- `maxResolution`
+- `removeBackground`
+- `watermarkText`
+- `watermarkPosition`
+
+Behavior defaults:
+- latest-wins debounce (`300ms`)
+- disk-first cache with lightweight memory index
+- request cache eviction (`max 20 entries`, `~120MB disk`)
+- keeps previous preview visible while a new generation is running
+
+Preview rendering should stay URL-based and frame-based to avoid loading GIF blobs into memory.  
+The demo now uses a frame-loop preview (`GIFFrameLoopPreview`) fed by `session.previewFrameURLs`.
+
+### Preview-first + save-time encoding (updated behavior)
+
+`GIFToolKitSession` now prioritizes responsive editor preview:
+
+- Attribute changes prepare processed preview frames (debounced latest-wins).
+- Final GIF encoding does **not** run on every edit.
+- `saveLatestGIF(...)` waits for any in-flight preview preparation, then encodes and saves once.
+- `generationResult` represents the **last saved/encoded GIF result**.
+
+This keeps UI interaction fast and avoids repeated high-cost encoding during slider/text edits.
+
 ## Generate GIF (before/after)
 
 Before:

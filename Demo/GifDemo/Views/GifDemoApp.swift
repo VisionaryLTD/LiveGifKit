@@ -15,6 +15,7 @@ struct GifDemoApp: App {
         WindowGroup {
             MainView()
                 .environment(viewModel)
+                .environment(viewModel.session)
                 .task {
                     viewModel.warmUp()
                 }
