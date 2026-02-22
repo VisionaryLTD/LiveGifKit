@@ -608,9 +608,8 @@ private extension GIFToolKitSession {
     ) async throws -> GIFEncodedExport {
         let maxFileSizeBytes = attributes.exportMaxFileSizeBytes
         let maxLongEdge = attributes.exportMaxLongEdge
-        var outputFPS = max(1, attributes.outputFPS)
+        let outputFPS = max(1, attributes.outputFPS)
         var longEdge = maxLongEdge
-        var frameStride = 1
         let hasBudget = maxFileSizeBytes != nil || maxLongEdge != nil
 
         for passIndex in 1...20 {
@@ -619,8 +618,7 @@ private extension GIFToolKitSession {
                 from: frameURLs,
                 outputURL: outputURL,
                 outputFPS: outputFPS,
-                maxLongEdge: longEdge,
-                frameStride: frameStride
+                maxLongEdge: longEdge
             )
             let fileSizeBytes = gifFileSize(for: result.gifURL)
             let resultLongEdge = max(result.pixelSize.width, result.pixelSize.height)
@@ -638,14 +636,6 @@ private extension GIFToolKitSession {
                 )
             }
 
-            if outputFPS > 6 {
-                let nextFPS = max(6, (outputFPS * 0.85).rounded(.down))
-                if nextFPS < outputFPS {
-                    outputFPS = nextFPS
-                    continue
-                }
-            }
-
             if let currentLongEdge = longEdge, currentLongEdge > 160 {
                 let nextLongEdge = max(160, (currentLongEdge * 0.85).rounded(.down))
                 if nextLongEdge < currentLongEdge {
@@ -657,19 +647,13 @@ private extension GIFToolKitSession {
                 continue
             }
 
-            if frameStride < 4 {
-                frameStride += 1
-                continue
-            }
-
             lastExportStatus = "HitMinQuality"
             throw GIFExportError.unableToFitBudget(
                 fileSizeBytes: fileSizeBytes,
                 maxFileSizeBytes: maxFileSizeBytes,
                 longEdge: resultLongEdge,
                 maxLongEdge: maxLongEdge,
-                outputFPS: outputFPS,
-                frameStride: frameStride
+                outputFPS: outputFPS
             )
         }
 
@@ -679,8 +663,7 @@ private extension GIFToolKitSession {
             maxFileSizeBytes: maxFileSizeBytes,
             longEdge: 0,
             maxLongEdge: maxLongEdge,
-            outputFPS: outputFPS,
-            frameStride: frameStride
+            outputFPS: outputFPS
         )
     }
 
@@ -688,8 +671,7 @@ private extension GIFToolKitSession {
         from frameURLs: [URL],
         outputURL: URL,
         outputFPS: Double,
-        maxLongEdge: CGFloat?,
-        frameStride: Int
+        maxLongEdge: CGFloat?
     ) async throws -> GIFGenerationURLResult {
         #if DEBUG
         finalEncodeCount += 1
@@ -703,7 +685,6 @@ private extension GIFToolKitSession {
                 outputURL: outputURL,
                 outputFPS: outputFPS,
                 maxLongEdge: maxLongEdge,
-                frameStride: frameStride,
                 encoding: encoder
             )
         }.value
@@ -991,13 +972,12 @@ private enum GIFExportError: LocalizedError {
         maxFileSizeBytes: Int?,
         longEdge: CGFloat,
         maxLongEdge: CGFloat?,
-        outputFPS: Double,
-        frameStride: Int
+        outputFPS: Double
     )
 
     var errorDescription: String? {
         switch self {
-        case let .unableToFitBudget(fileSizeBytes, maxFileSizeBytes, longEdge, maxLongEdge, outputFPS, frameStride):
+        case let .unableToFitBudget(fileSizeBytes, maxFileSizeBytes, longEdge, maxLongEdge, outputFPS):
             let filePart: String
             if let maxFileSizeBytes {
                 filePart = "file \(fileSizeBytes)B > limit \(maxFileSizeBytes)B"
@@ -1010,7 +990,7 @@ private enum GIFExportError: LocalizedError {
             } else {
                 edgePart = "longEdge \(Int(longEdge))px"
             }
-            return "Unable to fit GIF budget (\(filePart), \(edgePart), fps \(Int(outputFPS)), stride \(frameStride)."
+            return "Unable to fit GIF budget (\(filePart), \(edgePart), fps locked at \(Int(outputFPS)))."
         }
     }
 }
@@ -1302,7 +1282,6 @@ private enum GIFFinalEncodePipeline {
         outputURL: URL,
         outputFPS: Double,
         maxLongEdge: CGFloat?,
-        frameStride: Int,
         encoding: any GIFEncoding
     ) throws -> GIFGenerationURLResult {
         guard !frameURLs.isEmpty else {
@@ -1312,18 +1291,10 @@ private enum GIFFinalEncodePipeline {
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
 
         let start = CFAbsoluteTimeGetCurrent()
-        let stride = max(1, frameStride)
-        let selectedFrameURLs = frameURLs.enumerated().compactMap { index, url in
-            index.isMultiple(of: stride) ? url : nil
-        }
-        guard !selectedFrameURLs.isEmpty else {
-            throw GifError.gifResultNil
-        }
-
         let effectiveLongEdge = maxLongEdge.map { max(1, $0) }
         var cgImages: [CGImage] = []
-        cgImages.reserveCapacity(selectedFrameURLs.count)
-        for frameURL in selectedFrameURLs {
+        cgImages.reserveCapacity(frameURLs.count)
+        for frameURL in frameURLs {
             guard
                 var image = GIFImage.gifImage(contentsOf: frameURL)
             else {

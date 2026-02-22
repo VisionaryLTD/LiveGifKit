@@ -295,11 +295,16 @@ struct GIFToolKitSessionTests {
         #expect(policy.decodeMemoryBudgetBytes == 24 * 1024 * 1024)
     }
 
-    @Test("Save with budget converges to fit file size")
+    @Test("Save with budget converges via resolution only and keeps FPS")
     func saveWithBudgetConverges() async throws {
         let recorder = SessionRecorderGIFToolKit()
         let extractor = SessionVideoFrameExtractorStub()
-        extractor.outputImages = [makeGIFImage(width: 800, height: 800, alpha: 255)]
+        extractor.outputImages = [
+            makeGIFImage(width: 800, height: 800, alpha: 255),
+            makeGIFImage(width: 800, height: 800, alpha: 255),
+            makeGIFImage(width: 800, height: 800, alpha: 255),
+            makeGIFImage(width: 800, height: 800, alpha: 255),
+        ]
         let encoder = SessionEncodingStub()
         let session = makeSession(
             recorder: recorder,
@@ -310,16 +315,21 @@ struct GIFToolKitSessionTests {
 
         var attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
         attributes.outputFPS = 10
+        attributes.sourceFPS = 18
         attributes.maxResolution = 800
         attributes.exportMaxLongEdge = 240
-        attributes.exportMaxFileSizeBytes = 1_600
+        attributes.exportMaxFileSizeBytes = 5_300
         session.attributes = attributes
         await waitUntil { !session.previewFrameURLs.isEmpty }
 
         _ = try await session.saveLatestGIF()
-        #expect((session.lastExportFileSizeBytes ?? 0) <= 1_600)
+        #expect((session.lastExportFileSizeBytes ?? 0) <= 5_300)
         #expect(session.lastExportStatus == "FitInBudget")
         #expect(session.lastExportPassCount >= 1)
+        #expect(session.lastExportFPS == 10)
+        #expect(session.generationResult?.frameCount == extractor.outputImages.count)
+        let policy = try #require(extractor.lastPolicy())
+        #expect(policy.sourceFPS == 18)
     }
 
     @Test("Save without budget is unconstrained")
@@ -346,11 +356,16 @@ struct GIFToolKitSessionTests {
         #expect(session.lastExportPassCount == 1)
     }
 
-    @Test("Save with impossible budget fails with hit-min-quality")
+    @Test("Save fails fast at min long edge without dropping frames or FPS")
     func saveImpossibleBudgetFails() async throws {
         let recorder = SessionRecorderGIFToolKit()
         let extractor = SessionVideoFrameExtractorStub()
-        extractor.outputImages = [makeGIFImage(width: 600, height: 600, alpha: 255)]
+        extractor.outputImages = [
+            makeGIFImage(width: 160, height: 160, alpha: 255),
+            makeGIFImage(width: 160, height: 160, alpha: 255),
+            makeGIFImage(width: 160, height: 160, alpha: 255),
+            makeGIFImage(width: 160, height: 160, alpha: 255),
+        ]
         let encoder = SessionEncodingStub()
         let session = makeSession(
             recorder: recorder,
@@ -360,8 +375,9 @@ struct GIFToolKitSessionTests {
         let sourceURL = try makeTempFileURL(ext: "mov")
 
         var attributes = GIFEditorAttributes(source: .videoFile(sourceURL))
+        attributes.outputFPS = 14
         attributes.exportMaxLongEdge = 160
-        attributes.exportMaxFileSizeBytes = 32
+        attributes.exportMaxFileSizeBytes = 3_000
         session.attributes = attributes
         await waitUntil { !session.previewFrameURLs.isEmpty }
 
@@ -369,9 +385,11 @@ struct GIFToolKitSessionTests {
             _ = try await session.saveLatestGIF()
             Issue.record("Expected save to fail under impossible budget")
         } catch {
-            #expect(!error.localizedDescription.isEmpty)
+            let message = error.localizedDescription
+            #expect(message.contains("fps locked"))
         }
         #expect(session.lastExportStatus == "HitMinQuality")
+        #expect(session.lastExportFPS == nil)
     }
 
     @Test("Auto subject framing enlarges small subject")
