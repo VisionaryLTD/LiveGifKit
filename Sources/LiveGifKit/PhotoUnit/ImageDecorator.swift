@@ -1,12 +1,11 @@
-//
-//  File.swift
-//
-//
-//  Created by tangxiaojun on 2023/12/18.
-//
-
 import Foundation
+import CoreGraphics
+
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// 水印参数model
 /// text: 水印文字
@@ -20,9 +19,9 @@ public struct ImageDecorateConfig {
     public let type: DecoratorType
     public var origin: CGPoint?
     public enum DecoratorType {
-        case text(text: String, font: UIFont = .boldSystemFont(ofSize: 62), textColor: UIColor = .red, bgColor: UIColor = .clear)
+        case text(text: String, font: PlatformFont = .boldSystemFont(ofSize: 62), textColor: PlatformColor = .red, bgColor: PlatformColor = .clear)
         case attributeText(text: NSAttributedString)
-        case image(image: UIImage, width: CGFloat = 60)
+        case image(image: GIFImage, width: CGFloat = 60)
     }
     
     public init(type: DecoratorType, location: DecoratorLocation = .center, offset: CGPoint = .init(x: 8, y: 8)) {
@@ -32,61 +31,120 @@ public struct ImageDecorateConfig {
     }
 }
 
-public extension UIImage {
-    func decorate(config: ImageDecorateConfig) -> UIImage {
-        let originImageSize = self.size
-        
-        UIGraphicsBeginImageContext(originImageSize)
-        self.draw(in: CGRectMake(0, 0, originImageSize.width, originImageSize.height))
-        
-        switch config.type {
-        case let .text(text, font, textColor, bgColor):
-            let textAttributes = [NSAttributedString.Key.foregroundColor: textColor,
-                                  NSAttributedString.Key.font: font,
-                                  NSAttributedString.Key.backgroundColor: bgColor]
-            let textSize = NSString(string: text).size(withAttributes: textAttributes)
-            if let origin = config.origin {
-                NSString(string: text).draw(in: CGRect(origin: origin, size: textSize), withAttributes: textAttributes)
-            } else {
-                let frame = config.location.rect(imageSize: originImageSize, decoratorSize: textSize, offset: config.offset)
-                NSString(string: text).draw(in: frame, withAttributes: textAttributes)
-            }
-            
-        case let .attributeText(text: text):
-            let textSize = text.size()
-            
-            if let origin = config.origin {
-                text.draw(in: CGRect(origin: origin, size: textSize))
-            } else {
-                let frame = config.location.rect(imageSize: originImageSize, decoratorSize: textSize, offset: config.offset)
-                text.draw(in: frame)
-            }
-            
-        case let .image(image, width):
-            let img = image.resize(width: width)
-            if let origin = config.origin {
-                image.draw(in: CGRect(origin: origin, size: img.size))
-            } else {
-                let frame = config.location.rect(imageSize: originImageSize, decoratorSize: img.size, offset: config.offset)
-                image.draw(in: frame)
-            }
+public extension GIFImage {
+    func decorate(config: ImageDecorateConfig) -> GIFImage {
+        decorate(watermarks: [GIFWatermark(config: config)])
+    }
+
+    func decorate(watermarks: [GIFWatermark]) -> GIFImage {
+        guard let cgImage = gifCGImage else {
+            return self
+        }
+        let width = cgImage.width
+        let height = cgImage.height
+        guard
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else {
+            return self
+        }
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let imageSize = CGSize(width: width, height: height)
+        for watermark in watermarks {
+            draw(watermark: watermark, context: context, imageSize: imageSize)
         }
 
-        guard let newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
-        UIGraphicsEndImageContext()
-        return newImage
+        guard let output = context.makeImage() else {
+            return self
+        }
+        return GIFImage.gifImage(cgImage: output)
     }
     
-    func maxChineseCharacterCount(forFont font: UIFont, inImageWidth imageWidth: CGFloat) -> Int {
+    func maxChineseCharacterCount(forFont font: PlatformFont, inImageWidth imageWidth: CGFloat) -> Int {
         let text = "我爱中文"
         let attributes = [NSAttributedString.Key.font: font]
         let size = CGSize(width: imageWidth, height: CGFloat.greatestFiniteMagnitude)
+        #if canImport(UIKit)
         let options: NSStringDrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
+        #else
+        let options: NSString.DrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
+        #endif
         let boundingRect = (text as NSString).boundingRect(with: size, options: options, attributes: attributes, context: nil)
         let characterCount = text.count
         let characterWidth = boundingRect.width / CGFloat(characterCount)
         let maxCharactersPerLine = Int(imageWidth / characterWidth)
         return maxCharactersPerLine
+    }
+
+    private func draw(watermark: GIFWatermark, context: CGContext, imageSize: CGSize) {
+        switch watermark.content {
+        case let .text(text, font, textColor, backgroundColor):
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: textColor,
+                .backgroundColor: backgroundColor,
+            ]
+            let attributed = NSAttributedString(string: text, attributes: attributes)
+            draw(attributed: attributed, watermark: watermark, context: context, imageSize: imageSize)
+        case let .attributedText(text):
+            draw(attributed: text, watermark: watermark, context: context, imageSize: imageSize)
+        case let .imageFile(url, width):
+            guard let image = GIFImage.gifImage(contentsOf: url) else {
+                return
+            }
+            let resized = image.resize(width: width)
+            guard let cgImage = resized.gifCGImage else {
+                return
+            }
+            let decoratorSize = CGSize(width: cgImage.width, height: cgImage.height)
+            let origin = watermark.origin
+                ?? watermark.position.decoratorLocation.rect(
+                    imageSize: imageSize,
+                    decoratorSize: decoratorSize,
+                    offset: watermark.offset
+                ).origin
+            let frame = CGRect(origin: origin, size: decoratorSize)
+            context.draw(cgImage, in: frame)
+        }
+    }
+
+    private func draw(
+        attributed: NSAttributedString,
+        watermark: GIFWatermark,
+        context: CGContext,
+        imageSize: CGSize
+    ) {
+        let textSize = attributed.size()
+        let frame = CGRect(
+            origin: watermark.origin
+                ?? watermark.position.decoratorLocation.rect(
+                    imageSize: imageSize,
+                    decoratorSize: textSize,
+                    offset: watermark.offset
+                ).origin,
+            size: textSize
+        )
+        #if canImport(UIKit)
+        UIGraphicsPushContext(context)
+        attributed.draw(with: frame, options: [.usesLineFragmentOrigin], context: nil)
+        UIGraphicsPopContext()
+        #else
+        let drawContext = NSStringDrawingContext()
+        let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        attributed.draw(with: frame, options: [.usesLineFragmentOrigin], context: drawContext)
+        NSGraphicsContext.restoreGraphicsState()
+        #endif
     }
 }
  
@@ -128,3 +186,86 @@ public enum DecoratorLocation: String, CaseIterable {
     }
 }
 
+extension GIFWatermarkPosition {
+    var decoratorLocation: DecoratorLocation {
+        switch self {
+        case .topLeft:
+            return .topLeft
+        case .topRight:
+            return .topRight
+        case .bottomLeft:
+            return .bottomLeft
+        case .bottomRight:
+            return .bottomRight
+        case .center:
+            return .center
+        }
+    }
+}
+
+extension GIFWatermark {
+    init(config: ImageDecorateConfig) {
+        let content: GIFWatermark.Content
+        switch config.type {
+        case let .text(text, font, textColor, bgColor):
+            content = .text(text, font: font, textColor: textColor, backgroundColor: bgColor)
+        case let .attributeText(text):
+            content = .attributedText(text)
+        case let .image(image, width):
+            if let imageFile = try? GIFWatermark.Content.makeImageFile(image, width: width) {
+                content = imageFile
+            } else {
+                content = .attributedText(NSAttributedString(string: ""))
+            }
+        }
+
+        self.init(
+            content: content,
+            position: config.location.gifPosition,
+            offset: config.offset,
+            origin: config.origin
+        )
+    }
+}
+
+extension ImageDecorateConfig {
+    init(watermark: GIFWatermark) {
+        let type: DecoratorType
+        switch watermark.content {
+        case let .text(text, font, textColor, backgroundColor):
+            type = .text(text: text, font: font, textColor: textColor, bgColor: backgroundColor)
+        case let .attributedText(text):
+            type = .attributeText(text: text)
+        case let .imageFile(url, width):
+            if let image = GIFImage.gifImage(contentsOf: url) {
+                type = .image(image: image, width: width)
+            } else {
+                type = .attributeText(text: NSAttributedString(string: ""))
+            }
+        }
+
+        self.init(
+            type: type,
+            location: watermark.position.decoratorLocation,
+            offset: watermark.offset
+        )
+        self.origin = watermark.origin
+    }
+}
+
+extension DecoratorLocation {
+    var gifPosition: GIFWatermarkPosition {
+        switch self {
+        case .topLeft:
+            return .topLeft
+        case .topRight:
+            return .topRight
+        case .bottomLeft:
+            return .bottomLeft
+        case .bottomRight:
+            return .bottomRight
+        case .center:
+            return .center
+        }
+    }
+}

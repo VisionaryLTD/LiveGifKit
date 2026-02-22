@@ -1,149 +1,170 @@
-//
-//  File.swift
-//
-//
-//  Created by tangxiaojun on 2023/12/12.
-//
-
 import Foundation
 import Vision
-import CoreImage.CIFilterBuiltins
+import CoreGraphics
+
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
-public extension UIImage {
+public extension GIFImage {
     func recognition() -> Bool {
-        guard let cgImage = self.cgImage else { return false }
-        let requests = [
-            VNRecognizeAnimalsRequest(),
-            VNDetectFaceRectanglesRequest()
-        ]
-        let requestHandler = VNImageRequestHandler(cgImage: cgImage)
-        do {
-            try requestHandler.perform(requests)
-        } catch {
-            print("识别请求错误 \(error)")
+        guard let cgImage = gifCGImage else {
+            return false
         }
-        let results = requests.map({ $0 as! ResultChecking })
-        if let request = results.first(where: { $0.isValid() }) {
-            return true
-        }
-        return false
-    }
-    
-    func adjustOrientation() -> UIImage {
-           let imageSize = self.size
-           UIGraphicsBeginImageContext(imageSize)
-           self.draw(in: CGRectMake(0, 0, imageSize.width, imageSize.height))
-           guard let newImage = UIGraphicsGetImageFromCurrentImageContext() else { return self }
-           UIGraphicsEndImageContext()
-           return newImage
-       }
-}
 
-public extension UIImage {
-    func resize(scale: CGFloat = 0.5) -> UIImage {
-        let size = self.size
-        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
-        let rect = CGRect(x: 0, y: 0, width: newSize.width, height: newSize.height)
-        
-        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
-        self.draw(in: rect)
-        let newImage = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        return newImage ?? self
+        let requestHandler = VNImageRequestHandler(cgImage: cgImage)
+        let animalRequest = VNRecognizeAnimalsRequest()
+        let faceRequest = VNDetectFaceRectanglesRequest()
+
+        do {
+            try requestHandler.perform([animalRequest, faceRequest])
+        } catch {
+            return false
+        }
+
+        let hasAnimal = (animalRequest.results?.first as? VNRecognizedObjectObservation) != nil
+        let hasFace = (faceRequest.results?.first as? VNFaceObservation) != nil
+        return hasAnimal || hasFace
     }
-     
-    func resize(width: CGFloat = 1, height: CGFloat = 1) -> UIImage {
-        let widthRatio  = width  / size.width
+
+    func adjustOrientation() -> GIFImage {
+        #if canImport(UIKit)
+        guard let cgImage else {
+            return self
+        }
+        return GIFImage(cgImage: cgImage, scale: 1.0, orientation: .up)
+        #else
+        self
+        #endif
+    }
+
+    func resize(scale: CGFloat = 0.5) -> GIFImage {
+        let baseSize = size
+        let newSize = CGSize(width: baseSize.width * scale, height: baseSize.height * scale)
+        return resize(to: newSize)
+    }
+
+    func resize(width: CGFloat = 1, height: CGFloat = 1) -> GIFImage {
+        guard size.width > 0, size.height > 0 else {
+            return self
+        }
+        let widthRatio = width / size.width
         let heightRatio = height / size.height
         let scalingFactor = max(widthRatio, heightRatio)
         return resize(scale: scalingFactor)
     }
-}
 
-extension CGImage {
-    func removeBackground(_ isTrue: Bool = true) async -> CGImage? {
-        if !isTrue {
+    func resize(to size: CGSize) -> GIFImage {
+        guard let cgImage = gifCGImage else {
             return self
         }
-        
-        let processor = ImageBackgroundRemovalProcessor(inputImage: self)
-        
-        do {
-            return try await processor.process()
-        } catch {
+        let width = Int(size.width.rounded())
+        let height = Int(size.height.rounded())
+        guard width > 0, height > 0 else {
+            return self
+        }
+        guard
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else {
+            return self
+        }
+
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let resizedImage = context.makeImage() else {
+            return self
+        }
+        return GIFImage.gifImage(cgImage: resizedImage)
+    }
+
+    static func gifExampleImage() -> GIFImage? {
+        #if canImport(UIKit)
+        return GIFImage(named: "example", in: .module, with: nil)
+        #else
+        guard
+            let imageURL = Bundle.module.url(
+                forResource: "example",
+                withExtension: "png",
+                subdirectory: "Assets.xcassets/example.imageset"
+            ),
+            let image = GIFImage(contentsOf: imageURL)
+        else {
             return nil
         }
+        return image
+        #endif
     }
-    
-//    private func removeBackgroundImpl() -> CGImage {
-//        let ciImage = CIImage(cgImage: self)
-//        guard let mask = subjectMask(ciImage: ciImage) else {
-//            return self
-//        }
-//        // Acquire the selected background image.
-//        let backgroundImage = CIImage(color: CIColor.clear).cropped(to: ciImage.extent)
-//        let filter = CIFilter.blendWithMask()
-//        filter.inputImage = ciImage
-//        filter.backgroundImage = backgroundImage
-//        filter.maskImage = mask
-//        let image = filter.outputImage!
-//        let resultImage = render(ciImage: image)
-//        return resultImage
-        
-//        let processor = ImageBackgroundRemovalProcessor(inputImage: self)
-//        return try! awa
-//    }
 }
 
-private func render(ciImage img: CIImage) -> CGImage {
-    guard let cgImage = CIContext(options: nil).createCGImage(img, from: img.extent) else {
-        fatalError("Failed to render CIImage.")
-    }
-    return cgImage
-}
-
-//private extension CGImage {
-//    func subjectMask(ciImage: CIImage) -> CIImage? {
-//        let request = VNGenerateForegroundInstanceMaskRequest()
-//        let handler = VNImageRequestHandler(ciImage: ciImage)
-//        do {
-//            try handler.perform([request])
-//        } catch {
-//            print("Failed to perform Vision request.")
-//            return nil
-//        }
-//
-//        guard let result = request.results?.first else { return nil }
-// 
-//        do {
-//            let mask = try result.generateScaledMaskForImage(forInstances: result.allInstances, from: handler)
-//            return CIImage(cvPixelBuffer: mask)
-//        } catch {
-//            return nil
-//        }
-//    }
-//}
- 
 extension CGImage {
-    func nonTransparentBoundingBox() -> CGRect? {
-        let image = self
-        
-        guard let pixelData = dataProvider?.data else { return nil }
+    func nonTransparentBoundingBox(
+        minimumAlpha: UInt8 = 8,
+        relativeAlphaThreshold: Double = 0.08
+    ) -> CGRect? {
+        guard width > 0, height > 0 else {
+            return nil
+        }
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard pixels.withUnsafeMutableBytes({ buffer in
+            guard let baseAddress = buffer.baseAddress else {
+                return false
+            }
+            guard let context = CGContext(
+                data: baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                return false
+            }
+            context.draw(self, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }) else {
+            return nil
+        }
 
-        let width = self.width
-        let height = self.height
-        let data: UnsafePointer<UInt8> = CFDataGetBytePtr(pixelData)
+        var maxAlpha: UInt8 = 0
+        for index in stride(from: 3, to: pixels.count, by: 4) {
+            maxAlpha = max(maxAlpha, pixels[index])
+        }
+        guard maxAlpha > 0 else {
+            return nil
+        }
+        let adaptiveThreshold = max(
+            Int(minimumAlpha),
+            Int((Double(maxAlpha) * relativeAlphaThreshold).rounded(.up))
+        )
 
-        var minX: Int = width
-        var minY: Int = height
-        var maxX: Int = 0
-        var maxY: Int = 0
+        if let rect = boundingRect(in: pixels, alphaThreshold: UInt8(clamping: adaptiveThreshold)) {
+            return rect
+        }
+        return boundingRect(in: pixels, alphaThreshold: minimumAlpha)
+    }
+
+    private func boundingRect(in pixels: [UInt8], alphaThreshold: UInt8) -> CGRect? {
+        var minX = width
+        var minY = height
+        var maxX = 0
+        var maxY = 0
 
         for y in 0..<height {
             for x in 0..<width {
-                let pixelIndex: Int = (width * y + x) * 4 // Assuming 4 bytes per pixel (RGBA)
-                if data[pixelIndex + 3] != 0 { // Alpha value is not zero; pixel is not transparent
+                let pixelIndex = ((y * width) + x) * 4
+                if pixels[pixelIndex + 3] >= alphaThreshold {
                     minX = min(minX, x)
                     minY = min(minY, y)
                     maxX = max(maxX, x)
@@ -152,15 +173,14 @@ extension CGImage {
             }
         }
 
-        if minX > maxX || minY > maxY {
-            return nil // Entire image is transparent
+        guard minX <= maxX, minY <= maxY else {
+            return nil
         }
-
         return CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
     }
-    
+
     func cropImage(toRect rect: CGRect) -> CGImage? {
-        guard let cgImage = self.cropping(to: rect) else { return nil }
+        guard let cgImage = cropping(to: rect) else { return nil }
         return cgImage
     }
 }

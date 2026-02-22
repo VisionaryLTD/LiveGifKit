@@ -1,38 +1,58 @@
-//
-//  FetchPhoto.swift
-//
-//
-//  Created by tangxiaojun on 2023/12/19.
-//
-
 import Foundation
 import Photos
-import UIKit
 
 public struct FetchPhoto {
-    public static func fetch(days: Int = 30) -> [UIImage] {
-        var images: [UIImage] = []
-        // 获取最近三十天的照片
+    public static func fetchAssets(
+        days: Int = 30,
+        targetSize: CGSize = CGSize(width: 50, height: 50),
+        outputDirectoryURL: URL? = nil
+    ) throws -> [GIFRecommendedAsset] {
+        let outputDirectory = outputDirectoryURL
+            ?? GIFTemporaryPaths.baseDirectory.appending(path: "Recommendations")
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+        var assets: [GIFRecommendedAsset] = []
         let fetchOptions = PHFetchOptions()
-        fetchOptions.predicate = NSPredicate(format: "creationDate > %@", Calendar.current.date(byAdding: .day, value: -days, to: Date())! as NSDate)
+        let fromDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? .distantPast
+        fetchOptions.predicate = NSPredicate(format: "creationDate > %@", fromDate as NSDate)
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         let fetchResult = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+
         fetchResult.enumerateObjects { asset, _, _ in
-            if asset.mediaSubtypes.contains(.photoLive) {
-                print("这个为实况照片")
-            } else {
-                print("普通照片")
-            }
             let requestOptions = PHImageRequestOptions()
             requestOptions.isSynchronous = true
-            PHCachingImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 50, height: 50), contentMode: .aspectFit, options: requestOptions) { image, _ in
-                guard let image = image else { return }
-                if image.recognition() {
-                    images.append(image)
+            requestOptions.resizeMode = .fast
+
+            PHCachingImageManager.default().requestImage(
+                for: asset,
+                targetSize: targetSize,
+                contentMode: .aspectFit,
+                options: requestOptions
+            ) { image, _ in
+                guard
+                    let image,
+                    image.recognition(),
+                    let data = image.gifPNGData
+                else {
+                    return
+                }
+
+                let fileName = "\(UUID().uuidString).png"
+                let fileURL = outputDirectory.appending(path: fileName)
+                do {
+                    try data.write(to: fileURL, options: .atomic)
+                    assets.append(
+                        GIFRecommendedAsset(
+                            assetLocalIdentifier: asset.localIdentifier,
+                            thumbnailURL: fileURL
+                        )
+                    )
+                } catch {
+                    return
                 }
             }
         }
-        
-        return images
+
+        return assets
     }
 }

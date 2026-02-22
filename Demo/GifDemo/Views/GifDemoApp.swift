@@ -9,10 +9,15 @@ import SwiftUI
 
 @main
 struct GifDemoApp: App {
-    @StateObject var vm = LiveGifViewModel()
+    @State private var viewModel = LiveGIFDemoViewModel()
+
     var body: some Scene {
         WindowGroup {
-            MainView().environmentObject(vm)
+            MainView()
+                .environment(viewModel)
+                .task {
+                    viewModel.warmUp()
+                }
         }
     }
 }

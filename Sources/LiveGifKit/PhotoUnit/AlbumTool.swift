@@ -1,73 +1,67 @@
-//
-//  File.swift
-//
-//
-//  Created by tangxiaojun on 2023/12/12.
-//
-
 import Foundation
-import PhotosUI
- 
-enum AlbumTool {
-    static let albumName = "LifeStickers"
-}
+import Photos
 
-public enum Method {
-    case url(URL)
-    case image(UIImage)
-    var request: PHAssetChangeRequest {
-        switch self {
-        case .url(let url):
-            return .creationRequestForAssetFromImage(atFileURL: url)!
-        case .image(let uiImage):
-            return .creationRequestForAsset(from: uiImage)
-        }
-    }
-}
-
-extension AlbumTool {
-    static func save(method: Method) async throws {
+internal enum AlbumTool {
+    static func save(request: GIFSaveURLRequest) async throws -> GIFSaveResult {
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         switch status {
-        case .authorized:
-            do {
-                let collection = try await createOrFindAlbum(name: albumName)
-                try PHPhotoLibrary.shared().performChangesAndWait {
-                    let assetChangeRequest = method.request
-                    let assetPlaceHolder = assetChangeRequest.placeholderForCreatedAsset
-                    let albumChangeRequest = PHAssetCollectionChangeRequest(for: collection)
-                    let enumeration: NSArray = [assetPlaceHolder!]
-                    albumChangeRequest!.addAssets(enumeration)
-                }
-            }
-            catch {
-                throw AlbumToolError.saveFail
-            }
+        case .authorized, .limited:
+            break
         case .denied:
             throw AlbumToolError.denied
         case .notDetermined:
             throw AlbumToolError.notDetermined
-        case .limited:
-            throw AlbumToolError.limited
         default:
             throw AlbumToolError.unknown
         }
+
+        let albumName: String
+        switch request.destination {
+        case .photoLibrary(let name):
+            albumName = name
+        }
+
+        let collection = try await createOrFindAlbum(name: albumName)
+        var localIdentifier: String?
+
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                let albumRequest = PHAssetCollectionChangeRequest(for: collection)
+                switch request.payload {
+                case .fileURL(let fileURL):
+                    let assetRequest = PHAssetCreationRequest.forAsset()
+                    assetRequest.addResource(with: .photo, fileURL: fileURL, options: nil)
+                    localIdentifier = assetRequest.placeholderForCreatedAsset?.localIdentifier
+                    if let placeholder = assetRequest.placeholderForCreatedAsset {
+                        albumRequest?.addAssets([placeholder] as NSArray)
+                    }
+                }
+            }
+        } catch {
+            throw AlbumToolError.saveFail
+        }
+
+        return GIFSaveResult(localIdentifier: localIdentifier)
     }
 }
-    
-extension AlbumTool {
+
+private extension AlbumTool {
     static func album(name: String) -> PHAssetCollection? {
         let fetchOptions = PHFetchOptions()
         fetchOptions.predicate = NSPredicate(format: "title = %@", name)
-        let collection = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: fetchOptions)
+        let collection = PHAssetCollection.fetchAssetCollections(
+            with: .album,
+            subtype: .any,
+            options: fetchOptions
+        )
         return collection.firstObject
     }
-    
+
     static func createOrFindAlbum(name: String) async throws -> PHAssetCollection {
-        if let album = album(name: name) {
-            return album
+        if let existingAlbum = album(name: name) {
+            return existingAlbum
         }
-        
+
         return try await withCheckedThrowingContinuation { continuation in
             PHPhotoLibrary.shared().performChanges({
                 PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: name)
@@ -76,10 +70,11 @@ extension AlbumTool {
                     continuation.resume(throwing: error)
                     return
                 }
-                if success, let assetCollection = self.album(name: name) {
-                    continuation.resume(returning: assetCollection)
+
+                if success, let createdAlbum = album(name: name) {
+                    continuation.resume(returning: createdAlbum)
                 } else {
-                    fatalError()
+                    continuation.resume(throwing: AlbumToolError.saveFail)
                 }
             }
         }
