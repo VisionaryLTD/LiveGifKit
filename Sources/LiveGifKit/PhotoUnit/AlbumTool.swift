@@ -3,15 +3,23 @@ import Photos
 
 internal enum AlbumTool {
     static func save(request: GIFSaveURLRequest) async throws -> GIFSaveResult {
-        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        let addOnlyStatus = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        let status: PHAuthorizationStatus
+        switch addOnlyStatus {
+        case .denied:
+            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        default:
+            status = addOnlyStatus
+        }
+
         switch status {
         case .authorized, .limited:
             break
-        case .denied:
+        case .denied, .restricted:
             throw AlbumToolError.denied
         case .notDetermined:
             throw AlbumToolError.notDetermined
-        default:
+        @unknown default:
             throw AlbumToolError.unknown
         }
 
