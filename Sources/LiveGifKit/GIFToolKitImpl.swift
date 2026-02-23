@@ -558,8 +558,13 @@ internal struct GIFVideoFrameExtractorLive: GIFVideoFrameExtracting {
         images.reserveCapacity(context.frameCount)
         for time in context.times {
             try Task.checkCancellation()
-            let cgImage = try context.generator.copyCGImage(at: time.timeValue, actualTime: nil)
-            let resized = GIFImage.gifImage(cgImage: cgImage).resize(width: context.effectiveLongEdge)
+            let resized = try autoreleasepool {
+                let cgImage = try context.generator.copyCGImage(at: time.timeValue, actualTime: nil)
+                return resizedFrameImage(
+                    from: cgImage,
+                    maxLongEdge: context.effectiveLongEdge
+                )
+            }
             images.append(resized)
         }
 
@@ -593,18 +598,22 @@ internal struct GIFVideoFrameExtractorLive: GIFVideoFrameExtracting {
 
         for (index, time) in context.times.enumerated() {
             try Task.checkCancellation()
-
-            let cgImage = try context.generator.copyCGImage(at: time.timeValue, actualTime: nil)
-            let resized = GIFImage.gifImage(cgImage: cgImage).resize(width: context.effectiveLongEdge)
-            if index == 0 {
-                pixelSize = resized.size
-            }
-            guard let pngData = resized.gifPNGData else {
-                throw GifError.invalidImageData
-            }
-
             let frameURL = outputDirectory.appending(path: "\(frameFilePrefix)-\(String(format: "%04d", index)).png")
-            try pngData.write(to: frameURL, options: .atomic)
+            let frameSize = try autoreleasepool {
+                let cgImage = try context.generator.copyCGImage(at: time.timeValue, actualTime: nil)
+                let resized = resizedFrameImage(
+                    from: cgImage,
+                    maxLongEdge: context.effectiveLongEdge
+                )
+                guard let pngData = resized.gifPNGData else {
+                    throw GifError.invalidImageData
+                }
+                try pngData.write(to: frameURL, options: .atomic)
+                return resized.size
+            }
+            if index == 0 {
+                pixelSize = frameSize
+            }
             frameURLs.append(frameURL)
         }
 
@@ -710,6 +719,10 @@ internal struct GIFVideoFrameExtractorLive: GIFVideoFrameExtracting {
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceAfter = .zero
         generator.requestedTimeToleranceBefore = .zero
+        generator.maximumSize = scaledOutputSize(
+            sourceSize: CGSize(width: sourceWidth, height: sourceHeight),
+            longEdge: effectiveLongEdge
+        )
 
         var times: [NSValue] = []
         times.reserveCapacity(frameCount)
@@ -742,6 +755,32 @@ internal struct GIFVideoFrameExtractorLive: GIFVideoFrameExtracting {
         let effectiveSourceFPS: Double
         let effectiveLongEdge: CGFloat
         let estimatedDecodeBytes: Int
+    }
+
+    private func resizedFrameImage(
+        from cgImage: CGImage,
+        maxLongEdge: CGFloat
+    ) -> GIFImage {
+        let currentLongEdge = max(CGFloat(cgImage.width), CGFloat(cgImage.height))
+        guard currentLongEdge > maxLongEdge + 0.5 else {
+            return GIFImage.gifImage(cgImage: cgImage)
+        }
+        return GIFImage.gifImage(cgImage: cgImage).resize(width: maxLongEdge)
+    }
+
+    private func scaledOutputSize(
+        sourceSize: CGSize,
+        longEdge: CGFloat
+    ) -> CGSize {
+        let sourceLongEdge = max(sourceSize.width, sourceSize.height)
+        guard sourceLongEdge > 0 else {
+            return sourceSize
+        }
+        let scale = min(1, longEdge / sourceLongEdge)
+        return CGSize(
+            width: max(1, sourceSize.width * scale),
+            height: max(1, sourceSize.height * scale)
+        )
     }
 }
 
